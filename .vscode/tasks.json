@@ -1,0 +1,72 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Cmake",
+      "type": "shell",
+      "command": "cmake -S . -B build -G Ninja  -DCMAKE_BUILD_TYPE=Debug",
+      "group": "build",
+      "problemMatcher": ["$gcc"],
+      "presentation": { "reveal": "always" }
+    },
+
+    {
+      "label": "Build Cmake optimized",
+      "type": "shell",
+      "command": "cmake -S . -B build -G Ninja  -DCMAKE_BUILD_TYPE=Release",
+      "group": "build",
+      "problemMatcher": ["$gcc"],
+      "presentation": { "reveal": "always" }
+    },
+
+    {
+      "label": "Compile App (Ninja)",
+      "type": "shell",
+      "command": "ninja",
+      "args": ["-C", "${workspaceFolder}/build", "app_native", "-j8"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$gcc"],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "dependsOn": ["clear-terminal"],
+      "dependsOrder": "sequence"
+    },
+
+    {
+      "label": "Compile App Wasm",
+      "type": "shell",
+      "command": "emcmake cmake -B build-web && cmake --build build-web",
+      "args": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$gcc"],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "dependsOn": ["clear-terminal"],
+      "dependsOrder": "sequence"
+    },
+
+    {
+      "label": "clear-terminal",
+      "type": "shell",
+      "command": "clear",
+      "presentation": {
+        "reveal": "never",
+        "panel": "shared"
+      }
+    }
+  ]
+}
