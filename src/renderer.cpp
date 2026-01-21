@@ -10,12 +10,11 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_wgpu.h"
 
+#include <bit>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
-
-#include <chrono>
 
 struct GaussianCPU {
   glm::vec3 mean;
@@ -75,11 +74,9 @@ PlyHeader parsePlyHeader(std::ifstream &file) {
   return header;
 }
 
-// Helper to convert SH coefficients to RGB
 inline float SH_C0 = 0.28209479177387814f;
 
 glm::vec3 shToRGB(float sh0, float sh1, float sh2) {
-  // Convert from SH to RGB (assuming DC component only)
   float r = 0.5f + SH_C0 * sh0;
   float g = 0.5f + SH_C0 * sh1;
   float b = 0.5f + SH_C0 * sh2;
@@ -172,13 +169,16 @@ preprocessGaussians(const std::vector<GaussianCPU> &cpuGaussians) {
     const auto &g = cpuGaussians[i];
 
     GaussianGPU gpu;
-    gpu.mean = g.mean;
-    gpu.opacity = g.opacity;
+    gpu.meanxy.x = g.mean.x;
+    gpu.meanxy.y = g.mean.y;
+    gpu.meanz_color.x = g.mean.z;
 
-    if (g.opacity >= 1.0) {
-      std::cout << g.opacity << std::endl;
-    }
-    gpu.color = g.color;
+    uint32_t r = round(g.color.x * 255.0);
+    uint32_t green = round(g.color.y * 255.0);
+    uint32_t b = round(g.color.z * 255.0);
+    uint32_t a = round(g.opacity * 255.0);
+    uint32_t packed = (r) | (green << 8) | (b << 16) | (a << 24);
+    gpu.meanz_color.y = std::bit_cast<float>(packed);
 
     // Build rotation matrix from quaternion
     glm::quat q = glm::normalize(
@@ -202,10 +202,6 @@ preprocessGaussians(const std::vector<GaussianCPU> &cpuGaussians) {
     gpu.cov3d[3] = Sigma[1][1]; // Σ11
     gpu.cov3d[4] = Sigma[2][1]; // Σ12 (was Sigma[1][2])
     gpu.cov3d[5] = Sigma[2][2];
-
-    gpu._pad1[0] = 0.0f;
-    gpu._pad1[1] = 0.0f;
-    gpu._pad2 = 0.0f;
 
     gpuGaussians.push_back(gpu);
   }
@@ -340,13 +336,10 @@ struct SceneData {
 };
 
 struct Gaussian {
-    mean: vec3<f32>,
-    opacity: f32,
-    cov3d: array<f32, 6>, // upper triangle
-    _pad1: vec2<f32>,
-    color: vec3<f32>,
-    _pad2: f32,
-};
+    meanxy: vec2<f32>,
+    meanz_color : vec2<f32>,
+    cov3d: array<f32, 6>,
+}; // 40bytes
 
 @group(0) @binding(0) var<uniform> scene: SceneData;
 @group(0) @binding(1) var<storage, read> gaussians: array<Gaussian>;
@@ -358,6 +351,16 @@ struct VSOut {
     @location(1) uv: vec2<f32>,
 };
 
+
+fn unpackRGBA(packed: u32) -> vec4f {
+    let r = packed & 0xFFu;
+    let g = (packed >> 8) & 0xFFu;
+    let b = (packed >> 16) & 0xFFu;
+    let a = (packed >> 24) & 0xFFu;
+    var c = vec4f(f32(r)/255., f32(g)/255., f32(b)/255., f32(a)/255.);
+    return c;
+}
+
 @vertex
 fn vs_main(
     @builtin(vertex_index) vid: u32,
@@ -365,8 +368,9 @@ fn vs_main(
 ) -> VSOut {
     let idx = sorted_indices[iid];
     let g = gaussians[idx];
-    
-    let cam = scene.view * vec4<f32>(g.mean, 1.0);
+   
+    let pos = vec3f(g.meanxy,g.meanz_color.x);
+    let cam = scene.view * vec4<f32>(pos, 1.0);
     let clipPos = scene.proj * cam;
     
     
@@ -429,7 +433,9 @@ let quad = array<vec2<f32>, 4>(
     
     // For ZO depth range [0,1], adjust depth factor
     let depthFactor = clipPos.z / clipPos.w;
-    let color = vec4<f32>(g.color, g.opacity) * clamp(depthFactor + 1.0, 0.0, 1.0);
+
+    let rgba = unpackRGBA(bitcast<u32>(g.meanz_color.y));
+    let color= vec4<f32>(rgba.rgb, rgba.a) * clamp(depthFactor + 1.0, 0.0, 1.0);
     
     let depth = clipPos.z / clipPos.w;  // Keep in [0,1] for WebGPU
    
@@ -452,7 +458,6 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
    
     return vec4<f32>(in.color.rgb ,B);
 }
-
 
 )";
   wgpu::ShaderSourceWGSL wgslDesc = {};
@@ -534,10 +539,10 @@ void Renderer::initHistogramPipeline() {
 
   {
     wgpu::BufferDescriptor desc{};
-    desc.label = "histUniformBuffer";
+    desc.label = "radixUniformBuffer";
     desc.size = sizeof(uint32_t) * 2;
     desc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-    histUniformBuffer = ctx.device.CreateBuffer(&desc);
+    radixUniformBuffer = ctx.device.CreateBuffer(&desc);
   }
 
   {
@@ -598,9 +603,9 @@ void Renderer::initHistogramPipeline() {
 
   {
     bgEntries[2].binding = 2;
-    bgEntries[2].buffer = histUniformBuffer;
+    bgEntries[2].buffer = radixUniformBuffer;
     bgEntries[2].offset = 0;
-    bgEntries[2].size = histUniformBuffer.GetSize();
+    bgEntries[2].size = radixUniformBuffer.GetSize();
   }
 
   {
@@ -727,14 +732,6 @@ void Renderer::initPrefixScanPipeline() {
     globalOffsetBuffer = ctx.device.CreateBuffer(&desc);
   }
 
-  {
-    wgpu::BufferDescriptor desc{};
-    desc.label = "prefixUniformBuffer";
-    desc.size = sizeof(uint32_t) * 2,
-    desc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-    prefixUniformBuffer = ctx.device.CreateBuffer(&desc);
-  }
-
   wgpu::BindGroupLayoutEntry entries[] = {
       {// histogram
        .binding = 0,
@@ -786,9 +783,9 @@ void Renderer::initPrefixScanPipeline() {
 
   {
     bgEntries[3].binding = 3;
-    bgEntries[3].buffer = prefixUniformBuffer;
+    bgEntries[3].buffer = radixUniformBuffer;
     bgEntries[3].offset = 0;
-    bgEntries[3].size = prefixUniformBuffer.GetSize();
+    bgEntries[3].size = radixUniformBuffer.GetSize();
   }
 
   wgpu::BindGroupDescriptor bgDesc = {
@@ -804,14 +801,14 @@ void Renderer::initPrefixScanPipeline() {
 @group(0) @binding(0) var<storage, read> hist : array<u32>;
 @group(0) @binding(1) var<storage, read_write> globalOffset : array<u32>;
 @group(0) @binding(2) var<storage, read_write> tileOffset : array<u32>;
-@group(0) @binding(3) var<uniform> params : vec2<u32>; // (numWorkgroups, radix=256)
+@group(0) @binding(3) var<uniform> params : vec2<u32>; // (digitOffset, numWorkgroups) 
 
 var<workgroup> temp : array<u32, 256>;
 
 @compute @workgroup_size(256)
 fn main(@builtin(local_invocation_id) lid : vec3<u32>) {
   let d = lid.x;
-  let G = params.x;
+  let G = params.y;
 
   // compute prefix per digit over workgroups
   var sum : u32 = 0u;
@@ -865,14 +862,6 @@ void Renderer::initScatterPipeline() {
   uint32_t numGroups = (gaussianCount + 255) / 256;
   uint32_t WGSize = 256; // (workgroup size)
   uint32_t tilesCount = (gaussianCount + WGSize - 1) / WGSize;
-
-  {
-    wgpu::BufferDescriptor desc{};
-    desc.label = "scatterUniformBuffer";
-    desc.size = sizeof(uint32_t) * 2;
-    desc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-    scatterUniformBuffer = ctx.device.CreateBuffer(&desc);
-  }
 
   wgpu::BindGroupLayoutEntry entries[] = {
       {// keys
@@ -961,9 +950,9 @@ void Renderer::initScatterPipeline() {
 
   {
     bgEntries[6].binding = 6;
-    bgEntries[6].buffer = scatterUniformBuffer;
+    bgEntries[6].buffer = radixUniformBuffer;
     bgEntries[6].offset = 0;
-    bgEntries[6].size = scatterUniformBuffer.GetSize();
+    bgEntries[6].size = radixUniformBuffer.GetSize();
   }
 
   {
@@ -1207,17 +1196,11 @@ void Renderer::initCullPipeline() {
 };
 
 struct Gaussian {
-   mean: vec3<f32>,
-    _pad0: f32,
+    meanxy: vec2<f32>,
+    meanz_color : vec2<f32>,
+    cov3d: array<f32, 6>,
+}; // 40bytes
 
-    scale: vec3<f32>,
-    _pad1: f32,
-
-    rotation: vec4<f32>,
-
-    color: vec3<f32>,
-    opacity: f32,
-};
 
 struct DrawIndirectArgs {
     vertexCount   : u32,
@@ -1253,8 +1236,8 @@ fn main(@builtin(global_invocation_id) id : vec3<u32>) {
     }
 
     let g = gaussians[i];
-
-    let worldPos = vec4<f32>(g.mean, 1.0);
+    let pos = vec3f(g.meanxy,g.meanz_color.x);
+    let worldPos = vec4<f32>(pos, 1.0);
     let viewPos  = scene.view * worldPos;
     let clipPos  = scene.proj * viewPos;
 
@@ -1361,42 +1344,21 @@ void Renderer::render(const FlyCamera &camera, float time) {
   {
 
     const uint32_t tiles = (gaussianCount + 255) / 256;
-    // const uint32_t maxDispatch = 65535;
 
     for (uint32_t pass = 0; pass < 4; ++pass) {
       const uint32_t digitOffset = pass * 8;
 
-      // ------------------------------------------------
-      // Update uniforms
-      // ------------------------------------------------
+      // update uniforms
 
-      struct HistParams {
+      struct RadixParams {
         uint32_t digitOffset;
         uint32_t numWorkgroups;
       } histParams = {digitOffset, tiles};
 
-      ctx.queue.WriteBuffer(histUniformBuffer, 0, &histParams,
+      ctx.queue.WriteBuffer(radixUniformBuffer, 0, &histParams,
                             sizeof(histParams));
 
-      struct PrefixParams {
-        uint32_t numWorkgroups;
-        uint32_t radix;
-      } prefixParams = {tiles, 256};
-
-      ctx.queue.WriteBuffer(prefixUniformBuffer, 0, &prefixParams,
-                            sizeof(prefixParams));
-
-      struct ScatterParams {
-        uint32_t digitOffset;
-        uint32_t numWorkgroups;
-      } scatterParams = {digitOffset, tiles};
-
-      ctx.queue.WriteBuffer(scatterUniformBuffer, 0, &scatterParams,
-                            sizeof(scatterParams));
-
-      // ------------------------------------------------
-      // Encode commands
-      // ------------------------------------------------
+      // encode commands
 
       wgpu::CommandEncoder encoder = ctx.device.CreateCommandEncoder();
       encoder.ClearBuffer(histogramBuffer, 0, histogramBuffer.GetSize());
@@ -1407,7 +1369,7 @@ void Renderer::render(const FlyCamera &camera, float time) {
         wgpu::ComputePassDescriptor passDesc{};
         wgpu::ComputePassEncoder cpass = encoder.BeginComputePass(&passDesc);
 
-        // ---------- Dispatch 1: Histogram ----------
+        // ----------  histogram ----------
         cpass.SetPipeline(histogramPipeline);
         if (pass % 2 == 0) {
           cpass.SetBindGroup(0, histogramBindGroup1);
@@ -1416,12 +1378,12 @@ void Renderer::render(const FlyCamera &camera, float time) {
         }
         cpass.DispatchWorkgroups(tiles, 1, 1);
 
-        // ---------- Dispatch 2: Prefix ----------
+        // ----------  prefix ----------
         cpass.SetPipeline(prefixPipeline);
         cpass.SetBindGroup(0, prefixBindGroup);
         cpass.DispatchWorkgroups(1, 1, 1);
 
-        // ---------- Dispatch 3: Scatter ----------
+        // ---------- scatter ----------
         cpass.SetPipeline(scatterPipeline);
         if (pass % 2 == 0) {
           cpass.SetBindGroup(0, scatterBindGroup1);
@@ -1433,7 +1395,6 @@ void Renderer::render(const FlyCamera &camera, float time) {
         cpass.End();
       }
 
-      // Submit
       wgpu::CommandBuffer cmd = encoder.Finish();
       ctx.queue.Submit(1, &cmd);
     }

@@ -6,15 +6,10 @@
 #include <glm/glm.hpp>
 
 struct GaussianGPU {
-  glm::vec3 mean;
-  float opacity;
-
-  float cov3d[6]; // 24 bytes: [Σ00, Σ01, Σ02, Σ11, Σ12, Σ22]
-  float _pad1[2]; // 8 bytes padding
-
-  glm::vec3 color; // 12 bytes
-  float _pad2;     // 4 bytes
-};
+  glm::vec2 meanxy;
+  glm::vec2 meanz_color;
+  float cov3d[6];
+}; // 40bytes
 
 class Renderer {
 public:
@@ -59,20 +54,18 @@ private:
   wgpu::BindGroup histogramBindGroup1;
   wgpu::BindGroup histogramBindGroup2;
   wgpu::Buffer histogramBuffer;
-  wgpu::Buffer histUniformBuffer;
+  wgpu::Buffer radixUniformBuffer;
   //
   wgpu::ComputePipeline prefixPipeline;
   wgpu::BindGroup prefixBindGroup;
   wgpu::Buffer globalOffsetBuffer;
   wgpu::Buffer tileOffsetBuffer;
-  wgpu::Buffer prefixUniformBuffer;
   //
   wgpu::ComputePipeline scatterPipeline;
   wgpu::BindGroup scatterBindGroup1;
   wgpu::BindGroup scatterBindGroup2;
   wgpu::Buffer keysOutBuffer;
   wgpu::Buffer valsOutBuffer;
-  wgpu::Buffer scatterUniformBuffer;
 
   //
 
