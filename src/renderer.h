@@ -25,7 +25,6 @@ public:
   void initHistogramPipeline();
   void initPrefixScanPipeline();
   void initScatterPipeline();
-  // void sort();
 
 private:
 private:
@@ -66,7 +65,6 @@ private:
   wgpu::BindGroup scatterBindGroup2;
   wgpu::Buffer keysOutBuffer;
   wgpu::Buffer valsOutBuffer;
-
   //
 
   uint32_t gaussianCount;

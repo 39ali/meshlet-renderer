@@ -526,7 +526,7 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
 void Renderer::initHistogramPipeline() {
 
   uint32_t numGroups = (gaussianCount + 255) / 256;
-  uint32_t WGSize = 256; // (workgroup size)
+  uint32_t WGSize = 256;
   uint32_t tilesCount = (gaussianCount + WGSize - 1) / WGSize;
 
   {
@@ -1342,7 +1342,6 @@ void Renderer::render(const FlyCamera &camera, float time) {
 
   // sort
   {
-
     const uint32_t tiles = (gaussianCount + 255) / 256;
 
     for (uint32_t pass = 0; pass < 4; ++pass) {
