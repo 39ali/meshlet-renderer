@@ -31,7 +31,7 @@
     </div>
 
     <script type="module">
-      import * as ems from "./build-web/app_native.js";
+      import * as ems from "./app_native.js";
       const mod = await ems.default();
       mod.canvas = document.getElementById("canvas");
       mod.specialHTMLTargets["!canvas"] = mod.canvas;
