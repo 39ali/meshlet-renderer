@@ -10,3 +10,9 @@
 [submodule "lib/imgui"]
 	path = lib/imgui
 	url = https://github.com/ocornut/imgui.git
+[submodule "lib/tinygltf"]
+	path = lib/tinygltf
+	url = https://github.com/syoyo/tinygltf.git
+[submodule "lib/meshoptimizer"]
+	path = lib/meshoptimizer
+	url = https://github.com/zeux/meshoptimizer.git

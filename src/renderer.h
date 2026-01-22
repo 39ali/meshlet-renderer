@@ -1,6 +1,5 @@
 #pragma once
 #define GLFW_INCLUDE_NONE
-#include "../exporter/splat.h"
 #include "renderer/flyCamera.h"
 #include "renderer/webGPUContext.h"
 #include <GLFW/glfw3.h>
@@ -17,9 +16,6 @@ public:
 
   void initCullPipeline();
   void initRenderPipline();
-  void initHistogramPipeline();
-  void initPrefixScanPipeline();
-  void initScatterPipeline();
 
 private:
 private:
@@ -30,9 +26,6 @@ private:
   wgpu::TextureView depthView;
 
   wgpu::Buffer sceneBuffer;
-
-  std::vector<GaussianGPU> gpuGaussian;
-  wgpu::Buffer gaussianBuffer;
 
   wgpu::RenderPipeline renderPipeline;
   wgpu::BindGroup renderBindGroup;

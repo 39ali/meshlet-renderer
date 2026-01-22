@@ -56,8 +56,15 @@ if(APPLE )
     )
 endif()
 
+
+# tinygltf
+add_subdirectory(lib/tinygltf)
+
+# meshoptimizer
+add_subdirectory(lib/meshoptimizer)
+
+
 if (EMSCRIPTEN)
-    #   set_target_properties(app_native PROPERTIES SUFFIX ".html")
     target_link_libraries(app_native PRIVATE emdawnwebgpu_cpp)
     target_link_options(app_native PRIVATE -sEXPORTED_RUNTIME_METHODS=['specialHTMLTargets'] -sEXPORT_ES6 -sMODULARIZE=1  -sINVOKE_RUN=0 -sNO_EXIT_RUNTIME=1 -sDISABLE_EXCEPTION_CATCHING=0  "-sALLOW_MEMORY_GROWTH=1" "-sASYNCIFY=1" --use-port=contrib.glfw3 )
     
@@ -74,13 +81,6 @@ else()
 endif()
 
 
-target_link_libraries(app_native PRIVATE webgpu_glfw glm)
+target_link_libraries(app_native PRIVATE webgpu_glfw glm  tinygltf meshoptimizer)
 
 
-
-## splat exporter 
- add_executable(splat_exporter
-    exporter/main.cpp
-)
-
-target_link_libraries(splat_exporter PRIVATE glm)
