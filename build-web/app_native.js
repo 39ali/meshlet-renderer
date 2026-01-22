@@ -88,7 +88,7 @@ if (ENVIRONMENT_IS_NODE) {
 
 // --pre-jses are emitted after the Module integration code, so that they can
 // refer to Module (if they choose; they can also define Module)
-// include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmp6zujug3w.js
+// include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmpzsrjqkot.js
 
   if (!Module['expectedDataFileDownloads']) Module['expectedDataFileDownloads'] = 0;
   Module['expectedDataFileDownloads']++;
@@ -217,25 +217,25 @@ Module['FS_createPath']("/", "assets", true, true);
     }
 
     }
-    loadPackage({"files": [{"filename": "/assets/train_iteration_30000.splat", "start": 0, "end": 42990448}, {"filename": "/assets/truck_iteration_30000.splat", "start": 42990448, "end": 125256256}], "remote_package_size": 125256256});
+    loadPackage({"files": [{"filename": "/assets/.DS_Store", "start": 0, "end": 6148}, {"filename": "/assets/train_iteration_30000.splat", "start": 6148, "end": 42996596}], "remote_package_size": 42996596});
 
   })();
 
-// end include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmp6zujug3w.js
-// include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmp0df_qbuj.js
+// end include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmpzsrjqkot.js
+// include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmpnzlbrers.js
 
     // All the pre-js content up to here must remain later on, we need to run
     // it.
     if ((typeof ENVIRONMENT_IS_WASM_WORKER != 'undefined' && ENVIRONMENT_IS_WASM_WORKER) || (typeof ENVIRONMENT_IS_PTHREAD != 'undefined' && ENVIRONMENT_IS_PTHREAD) || (typeof ENVIRONMENT_IS_AUDIO_WORKLET != 'undefined' && ENVIRONMENT_IS_AUDIO_WORKLET)) Module['preRun'] = [];
     var necessaryPreJSTasks = Module['preRun'].slice();
-  // end include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmp0df_qbuj.js
-// include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmpovid_k0q.js
+  // end include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmpnzlbrers.js
+// include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmp4mr55ko6.js
 
     if (!Module['preRun']) throw 'Module.preRun should exist because file support used it; did a pre-js delete it?';
     necessaryPreJSTasks.forEach((task) => {
       if (Module['preRun'].indexOf(task) < 0) throw 'All preRun tasks that exist before user pre-js code should remain after; did you replace Module or modify Module.preRun?';
     });
-  // end include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmpovid_k0q.js
+  // end include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmp4mr55ko6.js
 
 
 var arguments_ = [];

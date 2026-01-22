@@ -1,7 +1,6 @@
 build
 build-web/*
-!build-web/app_native.js
-!build-web/app_native.wasm
+!build-web/app_native.*
 !build-web/index.html
 
 *.ply
