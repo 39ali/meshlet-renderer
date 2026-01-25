@@ -36,12 +36,21 @@ struct Meshlet {
   uint32_t triangleCount;
 };
 
-struct IndirectDraw {
-  uint32_t vertexCount;
-  uint32_t instanceCount;
-  uint32_t firstVertex;
-  uint32_t firstInstance;
+struct VisibleMeshlet {
+  uint32_t meshletID;
+  uint32_t instanceID;
 };
+
+#include <random>
+glm::mat4 createRandomTranslation(float minRange, float maxRange) {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<float> dis(minRange, maxRange);
+
+  glm::vec3 randomPos(dis(gen), dis(gen), dis(gen));
+
+  return glm::translate(glm::mat4(1.0f), randomPos);
+}
 
 void loadGLTF(const char *path, std::vector<Vertex> &vertices,
               std::vector<uint32_t> &indices) {
@@ -55,7 +64,7 @@ void loadGLTF(const char *path, std::vector<Vertex> &vertices,
 
   const auto &prim = model.meshes[0].primitives[0];
 
-  // Positions
+  // positions
   const auto &posAcc = model.accessors.at(prim.attributes.at("POSITION"));
   const auto &posView = model.bufferViews[posAcc.bufferView];
   const auto &posBuf = model.buffers[posView.buffer];
@@ -69,7 +78,7 @@ void loadGLTF(const char *path, std::vector<Vertex> &vertices,
         glm::vec3(pos[i * 3 + 0], pos[i * 3 + 1], pos[i * 3 + 2]);
   }
 
-  // Indices
+  // indices
   const auto &idxAcc = model.accessors.at(prim.indices);
   const auto &idxView = model.bufferViews[idxAcc.bufferView];
   const auto &idxBuf = model.buffers[idxView.buffer];
@@ -221,7 +230,45 @@ Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
                           meshletTriangleBuffer.GetSize());
   }
 
-  meshletCount = meshlets.size();
+  std::vector<MeshInstance> meshInstances;
+  glm::mat4 scaleMat = glm::scale(glm::mat4(1.0f), glm::vec3(0.02f));
+
+  for (uint32_t i = 0; i < 10000; i++) {
+    glm::mat4 randomModelMatrix = createRandomTranslation(-30.0f, 30.0f);
+    meshInstances.push_back({.modelMatrix = randomModelMatrix * scaleMat});
+  }
+
+  {
+    wgpu::BufferDescriptor desc{};
+    desc.label = "meshInstanceBuffer";
+    desc.size = sizeof(MeshInstance) * meshInstances.size();
+    desc.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
+    meshInstanceBuffer = ctx.device.CreateBuffer(&desc);
+
+    ctx.queue.WriteBuffer(meshInstanceBuffer, 0, meshInstances.data(),
+                          meshInstanceBuffer.GetSize());
+  }
+
+  {
+    wgpu::BufferDescriptor desc{};
+    desc.label = "visibleMeshletBuffer";
+    desc.size = sizeof(VisibleMeshlet) * meshlets.size() * meshInstances.size();
+    desc.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
+    visibleMeshletBuffer = ctx.device.CreateBuffer(&desc);
+
+    std::vector<VisibleMeshlet> visibleMeshlets;
+
+    for (uint32_t j = 0; j < meshInstances.size(); j++) {
+      for (uint32_t i = 0; i < meshlets.size(); i++) {
+        visibleMeshlets.push_back({.meshletID = i, .instanceID = j});
+      }
+    }
+
+    ctx.queue.WriteBuffer(visibleMeshletBuffer, 0, visibleMeshlets.data(),
+                          visibleMeshletBuffer.GetSize());
+  }
+
+  meshletCount = meshlets.size() * meshInstances.size();
   trianglesCount = meshletTriangles.size() / 3.;
 
   maxMeshletTriangleCount = 0;
@@ -233,7 +280,8 @@ Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
   std::cout << "maxMeshletTriangleCount: " << maxMeshletTriangleCount
             << std::endl;
   std::cout << "meshletCount :" << meshletCount << std::endl;
-  std::cout << "triangles count :" << trianglesCount << std::endl;
+  std::cout << "triangles count :" << trianglesCount * meshInstances.size()
+            << std::endl;
   std::cout << "vertices count :" << vertices.size() << std::endl;
 
   initCullPipeline();
@@ -242,7 +290,7 @@ Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
 
 void Renderer::initRenderPipline() {
 
-  wgpu::BindGroupLayoutEntry entries[5] = {};
+  wgpu::BindGroupLayoutEntry entries[7] = {};
 
   // scene
   entries[0].binding = 0;
@@ -275,10 +323,22 @@ void Renderer::initRenderPipline() {
   entries[4].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
   entries[4].buffer.minBindingSize = meshletTriangleBuffer.GetSize();
 
-  wgpu::BindGroupLayoutDescriptor bglDesc{.entryCount = 5, .entries = entries};
+  // visibleMeshlets
+  entries[5].binding = 5;
+  entries[5].visibility = wgpu::ShaderStage::Vertex;
+  entries[5].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
+  entries[5].buffer.minBindingSize = visibleMeshletBuffer.GetSize();
+
+  // instances
+  entries[6].binding = 6;
+  entries[6].visibility = wgpu::ShaderStage::Vertex;
+  entries[6].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
+  entries[6].buffer.minBindingSize = meshInstanceBuffer.GetSize();
+
+  wgpu::BindGroupLayoutDescriptor bglDesc{.entryCount = 7, .entries = entries};
   wgpu::BindGroupLayout bgl = ctx.device.CreateBindGroupLayout(&bglDesc);
 
-  wgpu::BindGroupEntry bgEntries[5] = {};
+  wgpu::BindGroupEntry bgEntries[7] = {};
   bgEntries[0].binding = 0;
   bgEntries[0].buffer = sceneBuffer;
   bgEntries[0].offset = 0;
@@ -304,8 +364,18 @@ void Renderer::initRenderPipline() {
   bgEntries[4].offset = 0;
   bgEntries[4].size = meshletTriangleBuffer.GetSize();
 
+  bgEntries[5].binding = 5;
+  bgEntries[5].buffer = visibleMeshletBuffer;
+  bgEntries[5].offset = 0;
+  bgEntries[5].size = visibleMeshletBuffer.GetSize();
+
+  bgEntries[6].binding = 6;
+  bgEntries[6].buffer = meshInstanceBuffer;
+  bgEntries[6].offset = 0;
+  bgEntries[6].size = meshInstanceBuffer.GetSize();
+
   auto bgd = wgpu::BindGroupDescriptor{
-      .layout = bgl, .entryCount = 5, .entries = bgEntries};
+      .layout = bgl, .entryCount = 7, .entries = bgEntries};
   renderBindGroup = ctx.device.CreateBindGroup(&bgd);
 
   /////
@@ -329,12 +399,25 @@ struct Meshlet {
     triangleCount  : u32,
 };
 
+struct VisibleMeshlet {
+    meshletID: u32,
+    instanceID: u32,
+};
+
+struct MeshInstance {
+  modelMatrix: mat4x4<f32>,
+};
+
 @group(0) @binding(0) var<uniform> scene : SceneData;
 
 @group(0) @binding(1) var<storage, read> vertices : array<Vertex>;
 @group(0) @binding(2) var<storage, read> meshlets : array<Meshlet>;
 @group(0) @binding(3) var<storage, read> meshletVertices : array<u32>;
 @group(0) @binding(4) var<storage, read> meshletTriangles : array<u32>;
+
+@group(0) @binding(5) var<storage, read> visibleMeshlets: array<VisibleMeshlet>;
+@group(0) @binding(6) var<storage, read> instances: array<MeshInstance>;
+
 
 struct VSOut {
     @builtin(position) pos : vec4<f32>,
@@ -363,7 +446,10 @@ fn vs_main(
     @builtin(instance_index) meshletID : u32
 ) -> VSOut {
 
-  let meshlet = meshlets[meshletID]; 
+  let visibleData = visibleMeshlets[meshletID];
+  let meshlet = meshlets[visibleData.meshletID];
+  let instance = instances[visibleData.instanceID];
+
   
   let maxVtx = meshlet.triangleCount * 3u; 
   
@@ -376,7 +462,7 @@ fn vs_main(
   let v = vertices[vertexIndex];
 
     var out : VSOut;
-    out.pos = scene.proj* scene.view * vec4<f32>(v.pos, 1.0);
+    out.pos = scene.proj* scene.view * instance.modelMatrix * vec4<f32>(v.pos, 1.0);
     out.color = rand3(meshletID);
     return out;
 }
@@ -634,7 +720,7 @@ void Renderer::render(const FlyCamera &camera, float time) {
   scene.proj = camera.getProjectionMatrix();
 
   glm::mat4 scaleMat = glm::scale(glm::mat4(1.0f), glm::vec3(0.02f));
-  scene.view = camera.getViewMatrix() * scaleMat;
+  scene.view = camera.getViewMatrix();
   ctx.queue.WriteBuffer(sceneBuffer, 0, &scene, sizeof(SceneData));
 
   {
@@ -685,12 +771,11 @@ void Renderer::render(const FlyCamera &camera, float time) {
     pass.SetPipeline(renderPipeline);
     pass.SetBindGroup(0, renderBindGroup);
     pass.DrawIndirect(indirectBuffer, 0);
-
     pass.End();
   }
 
   // gui pass
-  // renderGui(encoder, view);
+  renderGui(encoder, view);
 
   wgpu::CommandBuffer cmd = encoder.Finish();
 

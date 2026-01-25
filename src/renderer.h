@@ -5,6 +5,10 @@
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 
+struct MeshInstance {
+  glm::mat4 modelMatrix;
+};
+
 class Renderer {
 public:
   Renderer(GLFWwindow *window, uint32_t width, uint32_t height, float xscale,
@@ -36,6 +40,9 @@ private:
   wgpu::Buffer meshletTriangleBuffer;
 
   wgpu::Buffer indirectBuffer;
+
+  wgpu::Buffer visibleMeshletBuffer;
+  wgpu::Buffer meshInstanceBuffer;
 
   uint32_t meshletCount;
   uint32_t trianglesCount;
