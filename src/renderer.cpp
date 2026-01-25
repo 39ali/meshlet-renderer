@@ -9,14 +9,124 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_wgpu.h"
 
+#define TINYGLTF_IMPLEMENTATION
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "tiny_gltf.h"
+
+#include "meshoptimizer.h"
+
 #include <fstream>
 #include <iostream>
 
 struct SceneData {
   glm::mat4 proj;
   glm::mat4 view;
-  glm::vec4 viewport;
 };
+
+struct Vertex {
+  glm::vec3 position;
+  float padding;
+};
+
+struct Meshlet {
+  uint32_t vertexOffset;
+  uint32_t triangleOffset;
+  uint32_t vertexCount;
+  uint32_t triangleCount;
+};
+
+struct IndirectDraw {
+  uint32_t vertexCount;
+  uint32_t instanceCount;
+  uint32_t firstVertex;
+  uint32_t firstInstance;
+};
+
+void loadGLTF(const char *path, std::vector<Vertex> &vertices,
+              std::vector<uint32_t> &indices) {
+  tinygltf::Model model;
+  tinygltf::TinyGLTF loader;
+  std::string err, warn;
+
+  if (!loader.LoadBinaryFromFile(&model, &err, &warn, path)) {
+    throw std::runtime_error("Failed to load glTF");
+  }
+
+  const auto &prim = model.meshes[0].primitives[0];
+
+  // Positions
+  const auto &posAcc = model.accessors.at(prim.attributes.at("POSITION"));
+  const auto &posView = model.bufferViews[posAcc.bufferView];
+  const auto &posBuf = model.buffers[posView.buffer];
+
+  const float *pos = reinterpret_cast<const float *>(
+      &posBuf.data[posView.byteOffset + posAcc.byteOffset]);
+
+  vertices.resize(posAcc.count);
+  for (size_t i = 0; i < posAcc.count; i++) {
+    vertices[i].position =
+        glm::vec3(pos[i * 3 + 0], pos[i * 3 + 1], pos[i * 3 + 2]);
+  }
+
+  // Indices
+  const auto &idxAcc = model.accessors.at(prim.indices);
+  const auto &idxView = model.bufferViews[idxAcc.bufferView];
+  const auto &idxBuf = model.buffers[idxView.buffer];
+
+  indices.resize(idxAcc.count);
+
+  if (idxAcc.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
+    const uint16_t *src = reinterpret_cast<const uint16_t *>(
+        &idxBuf.data[idxView.byteOffset + idxAcc.byteOffset]);
+    for (size_t i = 0; i < indices.size(); i++)
+      indices[i] = src[i];
+  } else {
+    memcpy(indices.data(), &idxBuf.data[idxView.byteOffset + idxAcc.byteOffset],
+           indices.size() * sizeof(uint32_t));
+  }
+}
+
+void buildMeshlets(const std::vector<Vertex> &vertices,
+                   const std::vector<uint32_t> &indices,
+                   std::vector<Meshlet> &meshletsOut,
+                   std::vector<uint32_t> &meshletVertices,
+                   std::vector<uint32_t> &meshletTrianglesOut) {
+  constexpr uint32_t MaxVerts = 64;
+  constexpr uint32_t MaxTris = 126;
+
+  size_t maxMeshlets =
+      meshopt_buildMeshletsBound(indices.size(), MaxVerts, MaxTris);
+
+  std::vector<meshopt_Meshlet> meshlets(maxMeshlets);
+  meshletVertices.resize(indices.size());
+
+  std::vector<uint8_t> meshletTriangles{};
+  meshletTriangles.resize(indices.size());
+
+  size_t count = meshopt_buildMeshlets(
+      meshlets.data(), meshletVertices.data(), meshletTriangles.data(),
+      indices.data(), indices.size(), &vertices[0].position.x, vertices.size(),
+      sizeof(Vertex), MaxVerts, MaxTris, 0.0f);
+
+  meshletsOut.resize(count);
+  for (size_t i = 0; i < count; i++) {
+    meshletsOut[i] = {meshlets[i].vertex_offset, meshlets[i].triangle_offset,
+                      meshlets[i].vertex_count, meshlets[i].triangle_count};
+  }
+
+  meshlets.resize(count);
+  meshletVertices.resize(meshlets.back().vertex_offset +
+                         meshlets.back().vertex_count);
+
+  // todo: use u8
+  meshletTriangles.resize(meshlets.back().triangle_offset +
+                          meshlets.back().triangle_count * 3);
+  meshletTrianglesOut.reserve(meshletTriangles.size());
+  for (auto v : meshletTriangles) {
+    meshletTrianglesOut.push_back(static_cast<uint32_t>(v));
+  }
+}
 
 Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
                    float xscale, float yscale)
@@ -40,49 +150,91 @@ Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
   depthTexture = ctx.device.CreateTexture(&desc);
   depthView = depthTexture.CreateView();
 
-  // gpuGaussian = loadGaussianGPU("assets/train_iteration_30000.splat");
+  std::vector<Vertex> vertices{};
+  std::vector<uint32_t> indices{};
+  loadGLTF("assets/Duck.glb", vertices, indices);
 
-  // gaussianCount = gpuGaussian.size();
-  // std::cout << "gaussianCount: " << gaussianCount << " " <<
-  // sizeof(GaussianGPU)
-  //           << std::endl;
+  std::vector<Meshlet> meshlets{};
+  std::vector<uint32_t> meshletVertices{};
+  std::vector<uint32_t> meshletTriangles{};
+  buildMeshlets(vertices, indices, meshlets, meshletVertices, meshletTriangles);
 
-  // {
-  //   wgpu::BufferDescriptor desc{};
-  //   desc.label = "scene buffer";
-  //   desc.size = sizeof(SceneData);
-  //   desc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-  //   sceneBuffer = ctx.device.CreateBuffer(&desc);
-  // }
+  {
+    wgpu::BufferDescriptor desc{};
+    desc.label = "scene buffer";
+    desc.size = sizeof(SceneData);
+    desc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+    sceneBuffer = ctx.device.CreateBuffer(&desc);
+  }
 
-  // {
-  //   wgpu::BufferDescriptor desc{};
-  //   desc.label = "gaussian buffer";
-  //   desc.size = sizeof(GaussianGPU) * gpuGaussian.size();
-  //   desc.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
-  //   gaussianBuffer = ctx.device.CreateBuffer(&desc);
-  //   ctx.queue.WriteBuffer(gaussianBuffer, 0, gpuGaussian.data(),
-  //                         sizeof(GaussianGPU) * gpuGaussian.size());
-  // }
+  {
+    wgpu::BufferDescriptor indirectDesc{.label = "Indirect Draw Buffer",
+                                        .usage = wgpu::BufferUsage::Indirect |
+                                                 wgpu::BufferUsage::Storage |
+                                                 wgpu::BufferUsage::CopyDst,
+                                        .size = sizeof(uint32_t) * 4};
 
-  // {
-  //   wgpu::BufferDescriptor desc{};
-  //   desc.label = "visibleIndexBuffer";
-  //   desc.size = sizeof(uint32_t) * gaussianCount;
-  //   desc.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
-  //   visibleIndexBuffer = ctx.device.CreateBuffer(&desc);
-  // }
+    indirectBuffer = ctx.device.CreateBuffer(&indirectDesc);
+  }
 
-  // {
-  //   wgpu::BufferDescriptor indirectDesc{.label = "Indirect Draw Buffer",
-  //                                       .usage = wgpu::BufferUsage::Indirect
-  //                                       |
-  //                                                wgpu::BufferUsage::Storage |
-  //                                                wgpu::BufferUsage::CopyDst,
-  //                                       .size = sizeof(uint32_t) * 4};
+  {
+    wgpu::BufferDescriptor desc{};
+    desc.label = "vertexBuffer";
+    desc.size = sizeof(Vertex) * vertices.size();
+    desc.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
+    vertexBuffer = ctx.device.CreateBuffer(&desc);
 
-  //   indirectBuffer = ctx.device.CreateBuffer(&indirectDesc);
-  // }
+    ctx.queue.WriteBuffer(vertexBuffer, 0, vertices.data(),
+                          vertexBuffer.GetSize());
+  }
+
+  {
+    wgpu::BufferDescriptor desc{};
+    desc.label = "meshletBuffer";
+    desc.size = sizeof(Meshlet) * meshlets.size();
+    desc.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
+    meshletBuffer = ctx.device.CreateBuffer(&desc);
+
+    ctx.queue.WriteBuffer(meshletBuffer, 0, meshlets.data(),
+                          meshletBuffer.GetSize());
+  }
+
+  {
+    wgpu::BufferDescriptor desc{};
+    desc.label = "meshletVertexBuffer";
+    desc.size = sizeof(uint32_t) * meshletVertices.size();
+    desc.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
+    meshletVertexBuffer = ctx.device.CreateBuffer(&desc);
+
+    ctx.queue.WriteBuffer(meshletVertexBuffer, 0, meshletVertices.data(),
+                          meshletVertexBuffer.GetSize());
+  }
+
+  {
+    wgpu::BufferDescriptor desc{};
+    desc.label = "meshletTriangleBuffer";
+    desc.size = sizeof(uint32_t) * meshletTriangles.size();
+    desc.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
+    meshletTriangleBuffer = ctx.device.CreateBuffer(&desc);
+
+    ctx.queue.WriteBuffer(meshletTriangleBuffer, 0, meshletTriangles.data(),
+                          meshletTriangleBuffer.GetSize());
+  }
+
+  meshletCount = meshlets.size();
+  trianglesCount = meshletTriangles.size() / 3.;
+
+  maxMeshletTriangleCount = 0;
+  for (auto &meshlet : meshlets) {
+    maxMeshletTriangleCount =
+        std::max(meshlet.triangleCount, maxMeshletTriangleCount);
+  }
+
+  std::cout << "maxMeshletTriangleCount: " << maxMeshletTriangleCount
+            << std::endl;
+  std::cout << "meshletCount :" << meshletCount << std::endl;
+  std::cout << "triangles count :" << trianglesCount << std::endl;
+  std::cout << "vertices count :" << vertices.size() << std::endl;
 
   initCullPipeline();
   initRenderPipline();
@@ -90,238 +242,210 @@ Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
 
 void Renderer::initRenderPipline() {
 
-  //   wgpu::BindGroupLayoutEntry entries[3] = {};
-  //   entries[0].binding = 0;
-  //   entries[0].visibility =
-  //       wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
-  //   entries[0].buffer.type = wgpu::BufferBindingType::Uniform;
-  //   entries[0].buffer.minBindingSize = sizeof(SceneData);
+  wgpu::BindGroupLayoutEntry entries[5] = {};
 
-  //   entries[1].binding = 1;
-  //   entries[1].visibility = wgpu::ShaderStage::Vertex;
-  //   entries[1].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
-  //   entries[1].buffer.minBindingSize = gaussianBuffer.GetSize();
+  // scene
+  entries[0].binding = 0;
+  entries[0].visibility =
+      wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+  entries[0].buffer.type = wgpu::BufferBindingType::Uniform;
+  entries[0].buffer.minBindingSize = sizeof(SceneData);
 
-  //   entries[2].binding = 2;
-  //   entries[2].visibility = wgpu::ShaderStage::Vertex;
-  //   entries[2].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
-  //   entries[2].buffer.minBindingSize = visibleIndexBuffer.GetSize();
+  // vertex
+  entries[1].binding = 1;
+  entries[1].visibility = wgpu::ShaderStage::Vertex;
+  entries[1].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
+  entries[1].buffer.minBindingSize = vertexBuffer.GetSize();
 
-  //   wgpu::BindGroupLayoutDescriptor bglDesc{.entryCount = 3, .entries =
-  //   entries}; wgpu::BindGroupLayout bgl =
-  //   ctx.device.CreateBindGroupLayout(&bglDesc);
+  // meshlet
+  entries[2].binding = 2;
+  entries[2].visibility = wgpu::ShaderStage::Vertex;
+  entries[2].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
+  entries[2].buffer.minBindingSize = meshletBuffer.GetSize();
 
-  //   wgpu::BindGroupEntry bgEntries[3] = {};
-  //   bgEntries[0].binding = 0;
-  //   bgEntries[0].buffer = sceneBuffer;
-  //   bgEntries[0].offset = 0;
-  //   bgEntries[0].size = sizeof(SceneData);
-  //   //
-  //   bgEntries[1].binding = 1;
-  //   bgEntries[1].buffer = gaussianBuffer;
-  //   bgEntries[1].offset = 0;
-  //   bgEntries[1].size = gaussianBuffer.GetSize(); // sizeof(SceneData);
-  //                                                 //
-  //   bgEntries[2].binding = 2;
-  //   bgEntries[2].buffer = visibleIndexBuffer;
-  //   bgEntries[2].offset = 0;
-  //   bgEntries[2].size = visibleIndexBuffer.GetSize();
+  // meshletvertex
+  entries[3].binding = 3;
+  entries[3].visibility = wgpu::ShaderStage::Vertex;
+  entries[3].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
+  entries[3].buffer.minBindingSize = meshletVertexBuffer.GetSize();
 
-  //   auto bgd = wgpu::BindGroupDescriptor{
-  //       .layout = bgl, .entryCount = 3, .entries = bgEntries};
-  //   renderBindGroup = ctx.device.CreateBindGroup(&bgd);
+  // meshlettriangle
+  entries[4].binding = 4;
+  entries[4].visibility = wgpu::ShaderStage::Vertex;
+  entries[4].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
+  entries[4].buffer.minBindingSize = meshletTriangleBuffer.GetSize();
 
-  //   /////
+  wgpu::BindGroupLayoutDescriptor bglDesc{.entryCount = 5, .entries = entries};
+  wgpu::BindGroupLayout bgl = ctx.device.CreateBindGroupLayout(&bglDesc);
 
-  //   auto shaderWGSL = R"(
-  // struct SceneData {
-  //     proj: mat4x4<f32>,
-  //     view: mat4x4<f32>,
-  //     viewport: vec4<f32>, // (width, height, _, _)
-  // };
+  wgpu::BindGroupEntry bgEntries[5] = {};
+  bgEntries[0].binding = 0;
+  bgEntries[0].buffer = sceneBuffer;
+  bgEntries[0].offset = 0;
+  bgEntries[0].size = sizeof(SceneData);
+  //
+  bgEntries[1].binding = 1;
+  bgEntries[1].buffer = vertexBuffer;
+  bgEntries[1].offset = 0;
+  bgEntries[1].size = vertexBuffer.GetSize();
+  //
+  bgEntries[2].binding = 2;
+  bgEntries[2].buffer = meshletBuffer;
+  bgEntries[2].offset = 0;
+  bgEntries[2].size = meshletBuffer.GetSize();
 
-  // struct Gaussian {
-  //     meanxy: vec2<f32>,
-  //     meanz_color : vec2<f32>,
-  //     cov3d: array<f32, 6>,
-  // }; // 40bytes
+  bgEntries[3].binding = 3;
+  bgEntries[3].buffer = meshletVertexBuffer;
+  bgEntries[3].offset = 0;
+  bgEntries[3].size = meshletVertexBuffer.GetSize();
 
-  // @group(0) @binding(0) var<uniform> scene: SceneData;
-  // @group(0) @binding(1) var<storage, read> gaussians: array<Gaussian>;
-  // @group(0) @binding(2) var<storage, read> sorted_indices: array<u32>;
+  bgEntries[4].binding = 4;
+  bgEntries[4].buffer = meshletTriangleBuffer;
+  bgEntries[4].offset = 0;
+  bgEntries[4].size = meshletTriangleBuffer.GetSize();
 
-  // struct VSOut {
-  //     @builtin(position) position: vec4<f32>,
-  //     @location(0) color: vec4<f32>,
-  //     @location(1) uv: vec2<f32>,
-  // };
+  auto bgd = wgpu::BindGroupDescriptor{
+      .layout = bgl, .entryCount = 5, .entries = bgEntries};
+  renderBindGroup = ctx.device.CreateBindGroup(&bgd);
 
-  // fn unpackRGBA(packed: u32) -> vec4f {
-  //     let r = packed & 0xFFu;
-  //     let g = (packed >> 8) & 0xFFu;
-  //     let b = (packed >> 16) & 0xFFu;
-  //     let a = (packed >> 24) & 0xFFu;
-  //     var c = vec4f(f32(r)/255., f32(g)/255., f32(b)/255., f32(a)/255.);
-  //     return c;
-  // }
+  /////
 
-  // @vertex
-  // fn vs_main(
-  //     @builtin(vertex_index) vid: u32,
-  //     @builtin(instance_index) iid: u32
-  // ) -> VSOut {
-  //     let idx = sorted_indices[iid];
-  //     let g = gaussians[idx];
+  auto shaderWGSL = R"(
 
-  //     let pos = vec3f(g.meanxy,g.meanz_color.x);
-  //     let cam = scene.view * vec4<f32>(pos, 1.0);
-  //     let clipPos = scene.proj * cam;
+struct SceneData {
+  proj: mat4x4<f32>,
+  view: mat4x4<f32>,
+};
 
-  //     let ndc = clipPos.xy / clipPos.w;
+struct Vertex {
+    pos : vec3<f32>,
+    pad:f32
+};
 
-  //     let Vrk = mat3x3<f32>(
-  //         vec3<f32>(g.cov3d[0], g.cov3d[1], g.cov3d[2]),
-  //         vec3<f32>(g.cov3d[1], g.cov3d[3], g.cov3d[4]),
-  //         vec3<f32>(g.cov3d[2], g.cov3d[4], g.cov3d[5])
-  //     );
+struct Meshlet {
+    vertexOffset   : u32,
+    triangleOffset : u32,
+    vertexCount    : u32,
+    triangleCount  : u32,
+};
 
-  //     // Extract focal lengths - perspectiveRH_ZO format
-  //     let fx = scene.proj[0][0] * scene.viewport.x * 0.5;
-  //     let fy = scene.proj[1][1] * scene.viewport.y * 0.5;  // Keep positive
+@group(0) @binding(0) var<uniform> scene : SceneData;
 
-  //     let z2 = cam.z * cam.z;
+@group(0) @binding(1) var<storage, read> vertices : array<Vertex>;
+@group(0) @binding(2) var<storage, read> meshlets : array<Meshlet>;
+@group(0) @binding(3) var<storage, read> meshletVertices : array<u32>;
+@group(0) @binding(4) var<storage, read> meshletTriangles : array<u32>;
 
-  //     let J = mat3x3<f32>(
-  //         vec3<f32>( fx / cam.z, 0.0,- (fx * cam.x) / z2 ),
-  //         vec3<f32>( 0.0, fy / cam.z, -(fy * cam.y) / z2 ),  // Both positive
-  //         vec3<f32>( 0.0, 0.0, 0.0 )
-  //     );
+struct VSOut {
+    @builtin(position) pos : vec4<f32>,
+     @location(0) color : vec3<f32>,
+};
 
-  //     let view3 = mat3x3<f32>(
-  //         scene.view[0].xyz,
-  //         scene.view[1].xyz,
-  //         scene.view[2].xyz
-  //     );
+fn hash32(x: u32) -> u32 {
+    var v = x;
+    v = (v ^ (v >> 16u)) * 0x7feb352du;
+    v = (v ^ (v >> 15u)) * 0x846ca68bu;
+    v = v ^ (v >> 16u);
+    return v;
+}
 
-  //     let T = transpose(view3) * J;
-  //     let cov2d = transpose(T) * Vrk * T;
+fn rand3(meshletID: u32) -> vec3<f32> {
+    let h = hash32(meshletID);
+    let r = f32((h & 0xFFu)) / 255.0;
+    let g = f32((h >> 8u) & 0xFFu) / 255.0;
+    let b = f32((h >> 16u) & 0xFFu) / 255.0;
+    return vec3<f32>(r, g, b);
+}
 
-  //     let mid = (cov2d[0][0] + cov2d[1][1]) * 0.5;
-  //     let radius = length(vec2<f32>((cov2d[0][0] - cov2d[1][1]) * 0.5,
-  //     cov2d[0][1])); let lambda1 = mid + radius; let lambda2 = mid - radius;
+@vertex
+fn vs_main(
+    @builtin(vertex_index) vtx : u32,
+    @builtin(instance_index) meshletID : u32
+) -> VSOut {
 
-  //     if (lambda2 <= 0.0) {
-  //         return VSOut(vec4<f32>(0.0, 0.0, 2.0, 1.0),
-  //                      vec4<f32>(0.0),
-  //                      vec2<f32>(0.0));
-  //     }
+  let meshlet = meshlets[meshletID]; 
+  
+  let maxVtx = meshlet.triangleCount * 3u; 
+  
+   if (vtx >= maxVtx) { var o : VSOut; o.pos = vec4<f32>(0.0, 0.0, 0.0, 0.0); return o; } 
+  
+  let triangleVertexIndex : u32 = meshletTriangles[meshlet.triangleOffset + vtx]; 
+  
+  let vertexIndex : u32 = meshletVertices[meshlet.vertexOffset + triangleVertexIndex]; 
+  
+  let v = vertices[vertexIndex];
 
-  //     let diag = normalize(vec2<f32>(cov2d[0][1], lambda1 - cov2d[0][0]));
-  //     let majorAxis = min(sqrt(2.0 * lambda1), 1024.0) * diag;
-  //     let minorAxis = min(sqrt(2.0 * lambda2), 1024.0) * vec2<f32>(diag.y,
-  //     -diag.x);
+    var out : VSOut;
+    out.pos = scene.proj* scene.view * vec4<f32>(v.pos, 1.0);
+    out.color = rand3(meshletID);
+    return out;
+}
 
-  // let quad = array<vec2<f32>, 4>(
-  //     vec2<f32>(-2.0, -2.0),
-  //     vec2<f32>( 2.0, -2.0),
-  //     vec2<f32>(-2.0,  2.0),
-  //     vec2<f32>( 2.0,  2.0)
-  // );
-  //     let q = quad[vid];
+@fragment
+fn fs_main(@location(0) color : vec3<f32>) -> @location(0) vec4<f32> {
+ return vec4<f32>(color, 1.0);
+}
 
-  //     let finalNDC = vec2<f32>(ndc.x, ndc.y) + q.x * 2.0 * majorAxis /
-  //     scene.viewport.xy
-  //                                           + q.y * 2.0 * minorAxis /
-  //                                           scene.viewport.xy;
 
-  //     // For ZO depth range [0,1], adjust depth factor
-  //     let depthFactor = clipPos.z / clipPos.w;
+  )";
+  wgpu::ShaderSourceWGSL wgslDesc = {};
+  wgslDesc.code = shaderWGSL;
+  // shader modules
+  auto desc = wgpu::ShaderModuleDescriptor{.nextInChain = &wgslDesc};
+  auto shaderModule = ctx.device.CreateShaderModule(&desc);
 
-  //     let rgba = unpackRGBA(bitcast<u32>(g.meanz_color.y));
-  //     let color= vec4<f32>(rgba.rgb, rgba.a) * clamp(depthFactor + 1.0,
-  //     0.0, 1.0);
+  // pipeline layout
 
-  //     let depth = clipPos.z / clipPos.w;  // Keep in [0,1] for WebGPU
+  wgpu::PipelineLayoutDescriptor plDesc = {
+      .bindGroupLayoutCount = 1,
+      .bindGroupLayouts = &bgl,
+  };
+  wgpu::PipelineLayout pipelineLayout =
+      ctx.device.CreatePipelineLayout(&plDesc);
 
-  //     return VSOut(vec4<f32>(finalNDC.x, finalNDC.y, 0.0, 1.0), color, q);
+  // render pipeline
 
-  // }
+  wgpu::RenderPipelineDescriptor rpDesc = {};
+  rpDesc.layout = pipelineLayout;
 
-  // @fragment
-  // fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
-  //     let A = -dot(in.uv, in.uv);
+  rpDesc.vertex = {
+      .module = shaderModule, .entryPoint = "vs_main", .buffers = {}};
 
-  //     if (A < -4.0) {
-  //         discard;
-  //     }
+  wgpu::ColorTargetState colorTarget = {};
+  colorTarget.format = ctx.backbufferFormat;
 
-  //     let B = exp(A) * in.color.a;
+  wgpu::BlendState blend = {
+      .color{.operation = wgpu::BlendOperation::Add,
+             .srcFactor = wgpu::BlendFactor::SrcAlpha,
+             .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
 
-  //     return vec4<f32>(in.color.rgb ,B);
-  // }
+      .alpha = wgpu::BlendComponent{
+          .operation = wgpu::BlendOperation::Add,
+          .srcFactor = wgpu::BlendFactor::One,
+          .dstFactor = wgpu::BlendFactor::Zero,
+      }};
 
-  // )";
-  //   wgpu::ShaderSourceWGSL wgslDesc = {};
-  //   wgslDesc.code = shaderWGSL;
-  //   // shader modules
-  //   auto desc = wgpu::ShaderModuleDescriptor{.nextInChain = &wgslDesc};
-  //   auto shaderModule = ctx.device.CreateShaderModule(&desc);
+  colorTarget.blend = &blend;
 
-  //   // pipeline layout
+  wgpu::DepthStencilState depthState{
+      .format = wgpu::TextureFormat::Depth24Plus,
+      .depthWriteEnabled = true,
+      .depthCompare = wgpu::CompareFunction::LessEqual,
+  };
 
-  //   wgpu::PipelineLayoutDescriptor plDesc = {
-  //       .bindGroupLayoutCount = 1,
-  //       .bindGroupLayouts = &bgl,
-  //   };
-  //   wgpu::PipelineLayout pipelineLayout =
-  //       ctx.device.CreatePipelineLayout(&plDesc);
+  wgpu::FragmentState fragment = {};
+  fragment.module = shaderModule;
+  fragment.entryPoint = "fs_main";
+  fragment.targetCount = 1;
+  fragment.targets = &colorTarget;
+  rpDesc.fragment = &fragment;
+  rpDesc.depthStencil = &depthState;
 
-  //   // render pipeline
+  rpDesc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
+  rpDesc.primitive.frontFace = wgpu::FrontFace::CCW;
+  rpDesc.primitive.cullMode = wgpu::CullMode::None;
 
-  //   wgpu::RenderPipelineDescriptor rpDesc = {};
-  //   rpDesc.layout = pipelineLayout;
-
-  //   rpDesc.vertex = {
-  //       .module = shaderModule,
-  //       .entryPoint = "vs_main",
-  //       .buffers = {} // No vertex buffers; procedural generation
-  //   };
-
-  //   wgpu::ColorTargetState colorTarget = {};
-  //   colorTarget.format = ctx.backbufferFormat;
-
-  //   wgpu::BlendState blend = {
-  //       .color{.operation = wgpu::BlendOperation::Add,
-  //              .srcFactor = wgpu::BlendFactor::SrcAlpha,
-  //              .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
-
-  //       .alpha = wgpu::BlendComponent{
-  //           .operation = wgpu::BlendOperation::Add,
-  //           .srcFactor = wgpu::BlendFactor::One,
-  //           .dstFactor = wgpu::BlendFactor::Zero,
-  //       }};
-
-  //   colorTarget.blend = &blend;
-
-  //   wgpu::DepthStencilState depthState{
-  //       .format = wgpu::TextureFormat::Depth24Plus,
-  //       .depthWriteEnabled = false,
-  //       .depthCompare = wgpu::CompareFunction::LessEqual,
-  //   };
-
-  //   wgpu::FragmentState fragment = {};
-  //   fragment.module = shaderModule;
-  //   fragment.entryPoint = "fs_main";
-  //   fragment.targetCount = 1;
-  //   fragment.targets = &colorTarget;
-  //   rpDesc.fragment = &fragment;
-  //   rpDesc.depthStencil = &depthState;
-
-  //   rpDesc.primitive.topology = wgpu::PrimitiveTopology::TriangleStrip;
-  //   rpDesc.primitive.frontFace = wgpu::FrontFace::CW;
-  //   rpDesc.primitive.cullMode = wgpu::CullMode::None;
-
-  //   renderPipeline = ctx.device.CreateRenderPipeline(&rpDesc);
+  renderPipeline = ctx.device.CreateRenderPipeline(&rpDesc);
 }
 
 void Renderer::initCullPipeline() {
@@ -505,39 +629,18 @@ void Renderer::initCullPipeline() {
 }
 
 void Renderer::render(const FlyCamera &camera, float time) {
-  return;
   // Update data
   SceneData scene;
   scene.proj = camera.getProjectionMatrix();
-  glm::mat4 flipScale =
-      glm::scale(glm::mat4(1.0f), glm::vec3(-1.0f, -1.0f, 1.0f));
-  scene.view = camera.getViewMatrix() * flipScale;
-  scene.viewport = glm::vec4(ctx.width, ctx.height, 0.0, 0.0);
+
+  glm::mat4 scaleMat = glm::scale(glm::mat4(1.0f), glm::vec3(0.02f));
+  scene.view = camera.getViewMatrix() * scaleMat;
   ctx.queue.WriteBuffer(sceneBuffer, 0, &scene, sizeof(SceneData));
 
   {
-    std::vector<uint32_t> zeros(gaussianCount, 0);
-    ctx.queue.WriteBuffer(visibleIndexBuffer, 0, zeros.data(),
-                          gaussianCount * sizeof(uint32_t));
-  }
-
-  {
-    uint32_t zero[] = {4, 0, 0, 0};
+    uint32_t zero[] = {maxMeshletTriangleCount * 3, meshletCount, 0, 0};
     ctx.queue.WriteBuffer(indirectBuffer, 0, zero, 4 * sizeof(uint32_t));
   }
-
-  // {
-  //   auto start = std::chrono::high_resolution_clock::now();
-  //   auto sortedIndices = sortGaussians(gpuGaussian, scene.view);
-  //   ctx.queue.WriteBuffer(sortedIndicesBuffer, 0, sortedIndices.data(),
-  //                         sizeof(uint32_t) * sortedIndices.size());
-
-  //   auto end = std::chrono::high_resolution_clock::now();
-  //   auto duration =
-  //       std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
-  //   std::cout << "Average time: " << duration.count() << " microseconds\n";
-  // }
 
   wgpu::SurfaceTexture surfaceTexture;
   ctx.surface.GetCurrentTexture(&surfaceTexture);
@@ -545,75 +648,16 @@ void Renderer::render(const FlyCamera &camera, float time) {
 
   // cull and write depth buffer
   {
-    wgpu::CommandEncoder encoder = ctx.device.CreateCommandEncoder();
-    wgpu::ComputePassEncoder pass = encoder.BeginComputePass();
-    pass.SetPipeline(cullingPipeline);
-    pass.SetBindGroup(0, cullingBindGroup);
-    uint32_t groups = (gaussianCount + 255) / 256;
-    pass.DispatchWorkgroups(groups);
-    pass.End();
+    // wgpu::CommandEncoder encoder = ctx.device.CreateCommandEncoder();
+    // wgpu::ComputePassEncoder pass = encoder.BeginComputePass();
+    // pass.SetPipeline(cullingPipeline);
+    // pass.SetBindGroup(0, cullingBindGroup);
+    // uint32_t groups = (gaussianCount + 255) / 256;
+    // pass.DispatchWorkgroups(groups);
+    // pass.End();
 
-    wgpu::CommandBuffer cmd = encoder.Finish();
-    ctx.queue.Submit(1, &cmd);
-  }
-
-  // sort
-  {
-    const uint32_t tiles = (gaussianCount + 255) / 256;
-
-    for (uint32_t pass = 0; pass < 4; ++pass) {
-      const uint32_t digitOffset = pass * 8;
-
-      // update uniforms
-
-      struct RadixParams {
-        uint32_t digitOffset;
-        uint32_t numWorkgroups;
-      } histParams = {digitOffset, tiles};
-
-      ctx.queue.WriteBuffer(radixUniformBuffer, 0, &histParams,
-                            sizeof(histParams));
-
-      // encode commands
-
-      wgpu::CommandEncoder encoder = ctx.device.CreateCommandEncoder();
-      encoder.ClearBuffer(histogramBuffer, 0, histogramBuffer.GetSize());
-      encoder.ClearBuffer(globalOffsetBuffer, 0, globalOffsetBuffer.GetSize());
-      encoder.ClearBuffer(tileOffsetBuffer, 0, tileOffsetBuffer.GetSize());
-
-      {
-        wgpu::ComputePassDescriptor passDesc{};
-        wgpu::ComputePassEncoder cpass = encoder.BeginComputePass(&passDesc);
-
-        // ----------  histogram ----------
-        cpass.SetPipeline(histogramPipeline);
-        if (pass % 2 == 0) {
-          cpass.SetBindGroup(0, histogramBindGroup1);
-        } else {
-          cpass.SetBindGroup(0, histogramBindGroup2);
-        }
-        cpass.DispatchWorkgroups(tiles, 1, 1);
-
-        // ----------  prefix ----------
-        cpass.SetPipeline(prefixPipeline);
-        cpass.SetBindGroup(0, prefixBindGroup);
-        cpass.DispatchWorkgroups(1, 1, 1);
-
-        // ---------- scatter ----------
-        cpass.SetPipeline(scatterPipeline);
-        if (pass % 2 == 0) {
-          cpass.SetBindGroup(0, scatterBindGroup1);
-        } else {
-          cpass.SetBindGroup(0, scatterBindGroup2);
-        }
-        cpass.DispatchWorkgroups(tiles, 1, 1);
-
-        cpass.End();
-      }
-
-      wgpu::CommandBuffer cmd = encoder.Finish();
-      ctx.queue.Submit(1, &cmd);
-    }
+    // wgpu::CommandBuffer cmd = encoder.Finish();
+    // ctx.queue.Submit(1, &cmd);
   }
 
   // render
@@ -641,6 +685,7 @@ void Renderer::render(const FlyCamera &camera, float time) {
     pass.SetPipeline(renderPipeline);
     pass.SetBindGroup(0, renderBindGroup);
     pass.DrawIndirect(indirectBuffer, 0);
+
     pass.End();
   }
 
