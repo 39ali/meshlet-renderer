@@ -22,6 +22,8 @@
 struct SceneData {
   glm::mat4 proj;
   glm::mat4 view;
+  uint32_t totalMeshlets;
+  float padding[3];
 };
 
 struct Vertex {
@@ -124,17 +126,119 @@ void buildMeshlets(const std::vector<Vertex> &vertices,
                       meshlets[i].vertex_count, meshlets[i].triangle_count};
   }
 
-  meshlets.resize(count);
-  meshletVertices.resize(meshlets.back().vertex_offset +
-                         meshlets.back().vertex_count);
+  meshletVertices.resize(meshletsOut.back().vertexOffset +
+                         meshletsOut.back().vertexCount);
 
-  // todo: use u8
-  meshletTriangles.resize(meshlets.back().triangle_offset +
-                          meshlets.back().triangle_count * 3);
-  meshletTrianglesOut.reserve(meshletTriangles.size());
-  for (auto v : meshletTriangles) {
-    meshletTrianglesOut.push_back(static_cast<uint32_t>(v));
+  // pack triangles into 32bit
+  // We store 3 uint32s for every 4 triangles
+  meshletTriangles.resize(meshletsOut.back().triangleOffset +
+                          meshletsOut.back().triangleCount * 3);
+  meshletTrianglesOut.reserve(meshletTriangles.size() / 4);
+
+  for (auto &m : meshletsOut) {
+
+    const uint8_t *tris = meshletTriangles.data() + m.triangleOffset;
+
+    m.triangleOffset = uint32_t(meshletTrianglesOut.size());
+
+    for (uint32_t i = 0; i < m.triangleCount; i += 4) {
+      uint32_t v0 = 0u;
+      uint32_t v1 = 0u;
+      uint32_t v2 = 0u;
+
+      for (uint32_t j = 0; j < 4; ++j) {
+        if (i + j < m.triangleCount) {
+          const uint8_t *t = tris + (i + j) * 3;
+
+          v0 |= uint32_t(t[0]) << (j * 8);
+          v1 |= uint32_t(t[1]) << (j * 8);
+          v2 |= uint32_t(t[2]) << (j * 8);
+        }
+      }
+
+      meshletTrianglesOut.push_back(v0);
+      meshletTrianglesOut.push_back(v1);
+      meshletTrianglesOut.push_back(v2);
+    }
   }
+
+  // ///////////////////////debug
+  // for (size_t mIdx = 0; mIdx < meshletsOut.size(); ++mIdx) {
+  //   const auto &m = meshletsOut[mIdx];
+  //   std::cout << "Meshlet " << mIdx << " (" << m.triangleCount
+  //             << " triangles):" << std::endl;
+
+  //   // Each block of 3 uint32s contains 4 triangles
+  //   uint32_t numBlocks = (m.triangleCount + 3) / 4;
+
+  //   for (uint32_t b = 0; b < numBlocks; ++b) {
+  //     uint32_t base = m.triangleOffset + (b * 3);
+
+  //     uint32_t pV0 = meshletTrianglesOut[base + 0];
+  //     uint32_t pV1 = meshletTrianglesOut[base + 1];
+  //     uint32_t pV2 = meshletTrianglesOut[base + 2];
+
+  //     for (uint32_t t = 0; t < 4; ++t) {
+  //       uint32_t triIdx = (b * 4) + t;
+  //       if (triIdx >= m.triangleCount)
+  //         break;
+
+  //       // Extract 8-bit local indices
+  //       uint32_t v0 = (pV0 >> (t * 8)) & 0xFFu;
+  //       uint32_t v1 = (pV1 >> (t * 8)) & 0xFFu;
+  //       uint32_t v2 = (pV2 >> (t * 8)) & 0xFFu;
+
+  //       std::cout << "  Tri " << triIdx << ": [" << v0 << ", " << v1 << ", "
+  //                 << v2 << "]" << std::endl;
+  //     }
+  //   }
+  //   std::cout << "--------------------------" << std::endl;
+  // }
+
+  // for (uint32_t i = 0; i < meshlets.size(); i++) {
+
+  //   for (uint32_t j = 0; j < meshlets[i].triangle_count; j++) {
+
+  //     std::cout
+  //         << "  Tri " << j << ": ["
+  //         << uint32_t(meshletTriangles[meshlets[i].triangle_offset + j * 3 +
+  //         0])
+  //         << ", "
+  //         << uint32_t(meshletTriangles[meshlets[i].triangle_offset + j * 3 +
+  //         1])
+  //         << ", "
+  //         << uint32_t(meshletTriangles[meshlets[i].triangle_offset + j * 3 +
+  //         2])
+  //         << "]" << std::endl;
+  //   }
+  // }
+
+  //   for (auto t : meshletTrianglesOut) {
+  //     for (){
+  //  std::cout << <<(t) << std::endl;
+  //     }
+
+  //   }
+
+  int kk = 0;
+}
+
+std::vector<uint32_t> generateStaticSwizzleBuffer(uint32_t maxVisibleMeshlets) {
+  std::vector<uint32_t> swizzle;
+  swizzle.reserve(maxVisibleMeshlets * 384);
+
+  for (uint32_t m = 0; m < maxVisibleMeshlets; ++m) {
+    uint32_t meshletBase = m * 384;
+    for (uint32_t i = 0; i < 128; i += 4) {
+      uint32_t blockStart = meshletBase + (i / 4) * 12;
+      for (uint32_t j = 0; j < 4; ++j) {
+        swizzle.push_back(blockStart + 0 + j); // V0s
+        swizzle.push_back(blockStart + 4 + j); // V1s
+        swizzle.push_back(blockStart + 8 + j); // V2s
+      }
+    }
+  }
+  return swizzle;
 }
 
 Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
@@ -167,6 +271,7 @@ Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
   std::vector<uint32_t> meshletVertices{};
   std::vector<uint32_t> meshletTriangles{};
   buildMeshlets(vertices, indices, meshlets, meshletVertices, meshletTriangles);
+  // generateStaticIndexBuffer(meshlets.size());
 
   {
     wgpu::BufferDescriptor desc{};
@@ -181,7 +286,7 @@ Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
                                         .usage = wgpu::BufferUsage::Indirect |
                                                  wgpu::BufferUsage::Storage |
                                                  wgpu::BufferUsage::CopyDst,
-                                        .size = sizeof(uint32_t) * 4};
+                                        .size = sizeof(uint32_t) * 5};
 
     indirectBuffer = ctx.device.CreateBuffer(&indirectDesc);
   }
@@ -235,6 +340,7 @@ Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
 
   for (uint32_t i = 0; i < 10000; i++) {
     glm::mat4 randomModelMatrix = createRandomTranslation(-30.0f, 30.0f);
+    // glm::mat4 randomModelMatrix = createRandomTranslation(-1.0f, 1.0f);
     meshInstances.push_back({.modelMatrix = randomModelMatrix * scaleMat});
   }
 
@@ -269,7 +375,28 @@ Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
   }
 
   meshletCount = meshlets.size() * meshInstances.size();
-  trianglesCount = meshletTriangles.size() / 3.;
+  trianglesCount = meshletTriangles.size() * 4 / 3.;
+
+  {
+    wgpu::BufferDescriptor desc{};
+    desc.label = "Global Output Index Buffer";
+    // Calculate worst-case size: every potential meshlet being visible
+    desc.size = meshletCount * (3 * 128) * sizeof(uint32_t);
+    desc.usage = wgpu::BufferUsage::Storage;
+    globalIndexBuffer = ctx.device.CreateBuffer(&desc);
+  }
+
+  {
+    auto indices = generateStaticSwizzleBuffer(meshletCount);
+    wgpu::BufferDescriptor desc{};
+    desc.label = "index buffer";
+    // Calculate worst-case size: every potential meshlet being visible
+    desc.size = indices.size() * sizeof(uint32_t);
+    desc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Index;
+    indexBuffer = ctx.device.CreateBuffer(&desc);
+    ctx.queue.WriteBuffer(indexBuffer, 0, indices.data(),
+                          indexBuffer.GetSize());
+  }
 
   maxMeshletTriangleCount = 0;
   for (auto &meshlet : meshlets) {
@@ -290,7 +417,7 @@ Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
 
 void Renderer::initRenderPipline() {
 
-  wgpu::BindGroupLayoutEntry entries[7] = {};
+  wgpu::BindGroupLayoutEntry entries[8] = {};
 
   // scene
   entries[0].binding = 0;
@@ -335,10 +462,16 @@ void Renderer::initRenderPipline() {
   entries[6].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
   entries[6].buffer.minBindingSize = meshInstanceBuffer.GetSize();
 
-  wgpu::BindGroupLayoutDescriptor bglDesc{.entryCount = 7, .entries = entries};
+  // globalIndexBuffer
+  entries[7].binding = 7;
+  entries[7].visibility = wgpu::ShaderStage::Vertex;
+  entries[7].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
+  entries[7].buffer.minBindingSize = globalIndexBuffer.GetSize();
+
+  wgpu::BindGroupLayoutDescriptor bglDesc{.entryCount = 8, .entries = entries};
   wgpu::BindGroupLayout bgl = ctx.device.CreateBindGroupLayout(&bglDesc);
 
-  wgpu::BindGroupEntry bgEntries[7] = {};
+  wgpu::BindGroupEntry bgEntries[8] = {};
   bgEntries[0].binding = 0;
   bgEntries[0].buffer = sceneBuffer;
   bgEntries[0].offset = 0;
@@ -374,8 +507,13 @@ void Renderer::initRenderPipline() {
   bgEntries[6].offset = 0;
   bgEntries[6].size = meshInstanceBuffer.GetSize();
 
+  bgEntries[7].binding = 7;
+  bgEntries[7].buffer = globalIndexBuffer;
+  bgEntries[7].offset = 0;
+  bgEntries[7].size = globalIndexBuffer.GetSize();
+
   auto bgd = wgpu::BindGroupDescriptor{
-      .layout = bgl, .entryCount = 7, .entries = bgEntries};
+      .layout = bgl, .entryCount = 8, .entries = bgEntries};
   renderBindGroup = ctx.device.CreateBindGroup(&bgd);
 
   /////
@@ -385,6 +523,8 @@ void Renderer::initRenderPipline() {
 struct SceneData {
   proj: mat4x4<f32>,
   view: mat4x4<f32>,
+  totalMeshlets:u32,
+  padding:array<u32,3>,
 };
 
 struct Vertex {
@@ -417,6 +557,8 @@ struct MeshInstance {
 
 @group(0) @binding(5) var<storage, read> visibleMeshlets: array<VisibleMeshlet>;
 @group(0) @binding(6) var<storage, read> instances: array<MeshInstance>;
+@group(0) @binding(7) var<storage, read> outputIndices: array<u32>;
+
 
 
 struct VSOut {
@@ -441,28 +583,29 @@ fn rand3(meshletID: u32) -> vec3<f32> {
 }
 
 @vertex
-fn vs_main(
-    @builtin(vertex_index) vtx : u32,
-    @builtin(instance_index) meshletID : u32
-) -> VSOut {
+fn vs_main(@builtin(vertex_index) vid : u32) -> VSOut {
 
-  let visibleData = visibleMeshlets[meshletID];
-  let meshlet = meshlets[visibleData.meshletID];
-  let instance = instances[visibleData.instanceID];
+    let packed = outputIndices[vid];
+    let localID = packed & 0xFFu;
+    let meshletID = packed >> 8u;
 
-  
-  let maxVtx = meshlet.triangleCount * 3u; 
-  
-   if (vtx >= maxVtx) { var o : VSOut; o.pos = vec4<f32>(0.0, 0.0, 0.0, 0.0); return o; } 
-  
-  let triangleVertexIndex : u32 = meshletTriangles[meshlet.triangleOffset + vtx]; 
-  
-  let vertexIndex : u32 = meshletVertices[meshlet.vertexOffset + triangleVertexIndex]; 
-  
-  let v = vertices[vertexIndex];
+    if (localID == 0xff) {
+        var o : VSOut;
+        o.pos=  vec4<f32>(0.0, 0.0, 2.0, 1.0);
+       
+        return o;
+    }
+
+    let visibleData = visibleMeshlets[meshletID];
+    let m           = meshlets[visibleData.meshletID];
+    let instance    = instances[visibleData.instanceID];
+
+    // Look up actual vertex position
+    let vertexIndex = meshletVertices[m.vertexOffset + localID];
+    let v = vertices[vertexIndex];
 
     var out : VSOut;
-    out.pos = scene.proj* scene.view * instance.modelMatrix * vec4<f32>(v.pos, 1.0);
+    out.pos = scene.proj * scene.view * instance.modelMatrix * vec4<f32>(v.pos, 1.0);
     out.color = rand3(meshletID);
     return out;
 }
@@ -536,218 +679,281 @@ fn fs_main(@location(0) color : vec3<f32>) -> @location(0) vec4<f32> {
 
 void Renderer::initCullPipeline() {
 
-  //   {
-  //     wgpu::BufferDescriptor desc{};
-  //     desc.label = "depth buffer";
-  //     desc.size = sizeof(uint32_t) * gaussianCount;
-  //     desc.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
-  //     depthBuffer = ctx.device.CreateBuffer(&desc);
-  //   }
+  wgpu::BindGroupLayoutEntry entries[6] = {};
 
-  //   wgpu::BindGroupLayoutEntry entries[] = {
-  //       {// Scene uniform
-  //        .binding = 0,
-  //        .visibility = wgpu::ShaderStage::Compute,
-  //        .buffer = {.type = wgpu::BufferBindingType::Uniform}},
-  //       {// Gaussians
-  //        .binding = 1,
-  //        .visibility = wgpu::ShaderStage::Compute,
-  //        .buffer = {.type = wgpu::BufferBindingType::ReadOnlyStorage}},
-  //       {// Visible indices
-  //        .binding = 2,
-  //        .visibility = wgpu::ShaderStage::Compute,
-  //        .buffer = {.type = wgpu::BufferBindingType::Storage}},
-  //       {// indirectBuffer
-  //        .binding = 3,
-  //        .visibility = wgpu::ShaderStage::Compute,
-  //        .buffer = {.type = wgpu::BufferBindingType::Storage}},
-  //       {// depth Buffer
-  //        .binding = 4,
-  //        .visibility = wgpu::ShaderStage::Compute,
-  //        .buffer = {.type = wgpu::BufferBindingType::Storage}}};
+  // scene
+  entries[0].binding = 0;
+  entries[0].visibility = wgpu::ShaderStage::Compute;
+  entries[0].buffer.type = wgpu::BufferBindingType::Uniform;
+  entries[0].buffer.minBindingSize = sizeof(SceneData);
 
-  //   auto ldesc = wgpu::BindGroupLayoutDescriptor{
-  //       .entryCount = 5,
-  //       .entries = entries,
-  //   };
+  // meshlet
+  entries[1].binding = 1;
+  entries[1].visibility = wgpu::ShaderStage::Compute;
+  entries[1].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
+  entries[1].buffer.minBindingSize = meshletBuffer.GetSize();
 
-  //   auto layout = ctx.device.CreateBindGroupLayout(&ldesc);
+  // meshlettriangle
+  entries[2].binding = 2;
+  entries[2].visibility = wgpu::ShaderStage::Compute;
+  entries[2].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
+  entries[2].buffer.minBindingSize = meshletTriangleBuffer.GetSize();
 
-  //   std::array<wgpu::BindGroupEntry, 5> bgEntries = {};
-  //   {
+  // visibleMeshlets
+  entries[3].binding = 3;
+  entries[3].visibility = wgpu::ShaderStage::Compute;
+  entries[3].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
+  entries[3].buffer.minBindingSize = visibleMeshletBuffer.GetSize();
 
-  //     bgEntries[0].binding = 0;
-  //     bgEntries[0].buffer = sceneBuffer;
-  //     bgEntries[0].offset = 0;
-  //     bgEntries[0].size = sizeof(SceneData);
-  //   }
+  // indirectbuffer
+  entries[4].binding = 4;
+  entries[4].visibility = wgpu::ShaderStage::Compute;
+  entries[4].buffer.type = wgpu::BufferBindingType::Storage;
+  entries[4].buffer.minBindingSize = indirectBuffer.GetSize();
 
-  //   {
-  //     bgEntries[1].binding = 1;
-  //     bgEntries[1].buffer = gaussianBuffer;
-  //     bgEntries[1].offset = 0;
-  //     bgEntries[1].size = gaussianBuffer.GetSize();
-  //   }
+  // globalIndexBuffer
+  entries[5].binding = 5;
+  entries[5].visibility = wgpu::ShaderStage::Compute;
+  entries[5].buffer.type = wgpu::BufferBindingType::Storage;
+  entries[5].buffer.minBindingSize = globalIndexBuffer.GetSize();
 
-  //   {
-  //     bgEntries[2].binding = 2;
-  //     bgEntries[2].buffer = visibleIndexBuffer;
-  //     bgEntries[2].offset = 0;
-  //     bgEntries[2].size = visibleIndexBuffer.GetSize();
-  //   }
+  wgpu::BindGroupLayoutDescriptor bglDesc{.entryCount = 6, .entries = entries};
+  wgpu::BindGroupLayout bgl = ctx.device.CreateBindGroupLayout(&bglDesc);
 
-  //   {
-  //     bgEntries[3].binding = 3;
-  //     bgEntries[3].buffer = indirectBuffer;
-  //     bgEntries[3].offset = 0;
-  //     bgEntries[3].size = indirectBuffer.GetSize();
-  //   }
+  wgpu::BindGroupEntry bgEntries[6] = {};
+  bgEntries[0].binding = 0;
+  bgEntries[0].buffer = sceneBuffer;
+  bgEntries[0].offset = 0;
+  bgEntries[0].size = sizeof(SceneData);
+  //
 
-  //   {
-  //     bgEntries[4].binding = 4;
-  //     bgEntries[4].buffer = depthBuffer;
-  //     bgEntries[4].offset = 0;
-  //     bgEntries[4].size = depthBuffer.GetSize();
-  //   }
+  bgEntries[1].binding = 1;
+  bgEntries[1].buffer = meshletBuffer;
+  bgEntries[1].offset = 0;
+  bgEntries[1].size = meshletBuffer.GetSize();
 
-  //   wgpu::BindGroupDescriptor bgDesc = {
-  //       .label = "cull bindinggroup",
-  //       .layout = layout,
-  //       .entryCount = bgEntries.size(),
-  //       .entries = bgEntries.data(),
-  //   };
-  //   cullingBindGroup = ctx.device.CreateBindGroup(&bgDesc);
+  bgEntries[2].binding = 2;
+  bgEntries[2].buffer = meshletTriangleBuffer;
+  bgEntries[2].offset = 0;
+  bgEntries[2].size = meshletTriangleBuffer.GetSize();
 
-  //   const char *shaderWGSL = R"(
+  bgEntries[3].binding = 3;
+  bgEntries[3].buffer = visibleMeshletBuffer;
+  bgEntries[3].offset = 0;
+  bgEntries[3].size = visibleMeshletBuffer.GetSize();
 
-  //    struct SceneData {
-  //     proj: mat4x4<f32>,
-  //     view: mat4x4<f32>,
-  //     viewport: vec4<f32>,
-  // };
+  bgEntries[4].binding = 4;
+  bgEntries[4].buffer = indirectBuffer;
+  bgEntries[4].offset = 0;
+  bgEntries[4].size = indirectBuffer.GetSize();
 
-  // struct Gaussian {
-  //     meanxy: vec2<f32>,
-  //     meanz_color : vec2<f32>,
-  //     cov3d: array<f32, 6>,
-  // }; // 40bytes
+  bgEntries[5].binding = 5;
+  bgEntries[5].buffer = globalIndexBuffer;
+  bgEntries[5].offset = 0;
+  bgEntries[5].size = globalIndexBuffer.GetSize();
 
-  // struct DrawIndirectArgs {
-  //     vertexCount   : u32,
-  //     instanceCount : atomic<u32>,
-  //     firstVertex   : u32,
-  //     firstInstance : u32,
-  // };
+  wgpu::BindGroupDescriptor bgDesc = {
+      .label = "cull bindinggroup",
+      .layout = bgl,
+      .entryCount = 6,
+      .entries = bgEntries,
+  };
+  cullingBindGroup = ctx.device.CreateBindGroup(&bgDesc);
 
-  // @group(0) @binding(0) var<uniform> scene : SceneData;
-  // @group(0) @binding(1) var<storage, read> gaussians : array<Gaussian>;
-  // @group(0) @binding(2) var<storage, read_write> visibleIndices : array<u32>;
-  // @group(0) @binding(3) var<storage, read_write> drawArgs : DrawIndirectArgs;
-  // @group(0) @binding(4) var<storage, read_write> depths : array<u32>;
+  const char *shaderWGSL = R"(
+struct SceneData {
+  proj: mat4x4<f32>,
+  view: mat4x4<f32>,
+  totalMeshlets:u32,
+  padding:array<u32,3>,
+};
 
-  // fn floatToSortableUint(f: f32) -> u32 {
-  //     let f_bits = bitcast<u32>(f);
+struct Vertex {
+    pos : vec3<f32>,
+    pad:f32
+};
 
-  //     // If negative: flip all bits (0xFFFFFFFF)
-  //     // If positive: flip only the sign bit (0x80000000)
-  //     let mask = select(0x80000000u, 0xFFFFFFFFu, f < 0.0);
+struct Meshlet {
+    vertexOffset   : u32,
+    triangleOffset : u32,
+    vertexCount    : u32,
+    triangleCount  : u32,
+};
 
-  //     return f_bits ^ mask;
-  // }
+struct VisibleMeshlet {
+    meshletID: u32,
+    instanceID: u32,
+};
 
-  // @compute @workgroup_size(256)
-  // fn main(@builtin(global_invocation_id) id : vec3<u32>) {
+struct MeshInstance {
+  modelMatrix: mat4x4<f32>,
+};
 
-  //     let i = id.x;
-  //     if (i >= arrayLength(&gaussians)) {
-  //         return;
-  //     }
+struct DrawIndirectArgs {
+vertexCount   : atomic<u32>,
+    instanceCount : u32,
+    firstVertex   : u32,
+    firstInstance : u32,
+};
 
-  //     let g = gaussians[i];
-  //     let pos = vec3f(g.meanxy,g.meanz_color.x);
-  //     let worldPos = vec4<f32>(pos, 1.0);
-  //     let viewPos  = scene.view * worldPos;
-  //     let clipPos  = scene.proj * viewPos;
+@group(0) @binding(0) var<uniform> scene : SceneData;
 
-  //     let clip = 1.3 * clipPos.w;
-  //     if (clipPos.z < 0.0 || clipPos.z > clipPos.w ||
-  //         clipPos.x < -clip || clipPos.x > clip ||
-  //         clipPos.y < -clip || clipPos.y > clip) {
-  //         return ;
-  //     }
+@group(0) @binding(1) var<storage, read> meshlets : array<Meshlet>;
+@group(0) @binding(2) var<storage, read> meshletTriangles : array<u32>;
 
-  //     let writeIndex =atomicAdd(&drawArgs.instanceCount, 1u);
-  //     visibleIndices[writeIndex] = i;
+@group(0) @binding(3) var<storage, read> visibleMeshlets: array<VisibleMeshlet>;
+@group(0) @binding(4) var<storage, read_write> drawArgs : DrawIndirectArgs;
+@group(0) @binding(5) var<storage, read_write> outputIndices :array<vec4<u32>> ;
 
-  //     // write depth
-  //     let sortableDepth = floatToSortableUint(viewPos.z);
-  //     depths[writeIndex] = sortableDepth;
-  // }
 
-  // )";
+var<workgroup> num_primitives : u32;
+var<workgroup> base_index     : u32;
 
-  //   wgpu::ShaderSourceWGSL wgslDesc{};
-  //   wgslDesc.code = shaderWGSL;
-  //   wgpu::ShaderModuleDescriptor shaderDesc = wgpu::ShaderModuleDescriptor{
-  //       .nextInChain = &wgslDesc, .label = "culling"};
-  //   wgpu::ShaderModule shaderModule =
-  //   ctx.device.CreateShaderModule(&shaderDesc);
+const GROUP_SIZE : u32 = 32;
+@compute @workgroup_size(GROUP_SIZE)
+fn main(
+    @builtin(workgroup_id) wg : vec3<u32>,
+    @builtin(local_invocation_index) local_id : u32
+) {
 
-  //   wgpu::PipelineLayoutDescriptor pipelineLayoutDesc = {
-  //       .bindGroupLayoutCount = 1, .bindGroupLayouts = &layout};
+    let group_id = wg.x + (wg.y * 256u); 
 
-  //   wgpu::PipelineLayout pipelineLayout =
-  //       ctx.device.CreatePipelineLayout(&pipelineLayoutDesc);
+    // Guard against the remainder of the grid
+    if (group_id >= scene.totalMeshlets) {
+        return;
+    }
 
-  //   wgpu::ComputePipelineDescriptor cpDesc = {
+    if (group_id >= scene.totalMeshlets) {
+        return;
+    }
 
-  //       .label = "cullingpipeline",
-  //       .layout = pipelineLayout,
-  //       .compute =
-  //           {
-  //               .module = shaderModule,
-  //               .entryPoint = "main",
-  //           },
+    // lane 0 reads meshlet header (like Tellusim)
+    if (local_id == 0u) {
+        let vis = visibleMeshlets[group_id];
+        let meshlet = meshlets[vis.meshletID];
 
-  //   };
+        num_primitives = meshlet.triangleCount;
+        base_index     = meshlet.triangleOffset;
+    }
 
-  //   cullingPipeline = ctx.device.CreateComputePipeline(&cpDesc);
+    workgroupBarrier();
+
+   // ---- 1 invocation = 4 triangles ----
+    var indices_0 : u32 = 0xffffffff;
+    var indices_1 : u32 = 0xffffffff;
+    var indices_2 : u32 = 0xffffffff;
+
+    // only valid if this invocation maps to at least one triangle
+    if (local_id * 4u < num_primitives) {
+        let address = base_index + local_id * 3u;
+
+        indices_0 = meshletTriangles[address + 0u];
+        indices_1 = meshletTriangles[address + 1u]; 
+        indices_2 = meshletTriangles[address + 2u]; 
+    }
+
+    let group_index = group_id << 8u;
+
+    // 3 vec4 per invocation (one per triangle vertex)
+    let index = (GROUP_SIZE * group_id + local_id) * 3u;
+
+    outputIndices[index + 0u] =
+        (vec4<u32>(
+            indices_0,
+            indices_0 >> 8u,
+            indices_0 >> 16u,
+            indices_0 >> 24u
+        ) & vec4<u32>(0xFFu)) | vec4<u32>(group_index);
+
+    outputIndices[index + 1u] =
+        (vec4<u32>(
+            indices_1,
+            indices_1 >> 8u,
+            indices_1 >> 16u,
+            indices_1 >> 24u
+        ) & vec4<u32>(0xFFu)) | vec4<u32>(group_index);
+
+    outputIndices[index + 2u] =
+        (vec4<u32>(
+            indices_2,
+            indices_2 >> 8u,
+            indices_2 >> 16u,
+            indices_2 >> 24u
+        ) & vec4<u32>(0xFFu)) | vec4<u32>(group_index);
+}
+  )";
+
+  wgpu::ShaderSourceWGSL wgslDesc{};
+  wgslDesc.code = shaderWGSL;
+  wgpu::ShaderModuleDescriptor shaderDesc = wgpu::ShaderModuleDescriptor{
+      .nextInChain = &wgslDesc, .label = "culling"};
+  wgpu::ShaderModule shaderModule = ctx.device.CreateShaderModule(&shaderDesc);
+
+  wgpu::PipelineLayoutDescriptor pipelineLayoutDesc = {
+      .bindGroupLayoutCount = 1, .bindGroupLayouts = &bgl};
+
+  wgpu::PipelineLayout pipelineLayout =
+      ctx.device.CreatePipelineLayout(&pipelineLayoutDesc);
+
+  wgpu::ComputePipelineDescriptor cpDesc = {
+
+      .label = "cullingpipeline",
+      .layout = pipelineLayout,
+      .compute =
+          {
+              .module = shaderModule,
+              .entryPoint = "main",
+          },
+
+  };
+
+  cullingPipeline = ctx.device.CreateComputePipeline(&cpDesc);
 }
 
 void Renderer::render(const FlyCamera &camera, float time) {
   // Update data
   SceneData scene;
   scene.proj = camera.getProjectionMatrix();
+  scene.totalMeshlets = meshletCount;
 
   glm::mat4 scaleMat = glm::scale(glm::mat4(1.0f), glm::vec3(0.02f));
   scene.view = camera.getViewMatrix();
   ctx.queue.WriteBuffer(sceneBuffer, 0, &scene, sizeof(SceneData));
 
   {
-    uint32_t zero[] = {maxMeshletTriangleCount * 3, meshletCount, 0, 0};
-    ctx.queue.WriteBuffer(indirectBuffer, 0, zero, 4 * sizeof(uint32_t));
+    // struct DrawIndirectArgs {
+    // vertexCount   : atomic<u32>,
+    //     instanceCount : u32,
+    //     firstVertex   : u32,
+    //     firstInstance : u32,
+    // };
+    uint32_t vertexCount = meshletCount * 128 * 3;
+
+    uint32_t zero[] = {vertexCount, 1, 0, 0, 0};
+    ctx.queue.WriteBuffer(indirectBuffer, 0, zero, 5 * sizeof(uint32_t));
   }
 
   wgpu::SurfaceTexture surfaceTexture;
   ctx.surface.GetCurrentTexture(&surfaceTexture);
   wgpu::TextureView view = surfaceTexture.texture.CreateView();
 
+  wgpu::CommandEncoder encoder = ctx.device.CreateCommandEncoder();
+
   // cull and write depth buffer
   {
-    // wgpu::CommandEncoder encoder = ctx.device.CreateCommandEncoder();
-    // wgpu::ComputePassEncoder pass = encoder.BeginComputePass();
-    // pass.SetPipeline(cullingPipeline);
-    // pass.SetBindGroup(0, cullingBindGroup);
-    // uint32_t groups = (gaussianCount + 255) / 256;
-    // pass.DispatchWorkgroups(groups);
-    // pass.End();
 
-    // wgpu::CommandBuffer cmd = encoder.Finish();
-    // ctx.queue.Submit(1, &cmd);
+    uint32_t totalTasks = meshletCount;
+    uint32_t gridX = 256; // A safe width well under 65535
+    uint32_t gridY = (totalTasks + gridX - 1) / gridX; // Ceiling division
+
+    wgpu::ComputePassEncoder pass = encoder.BeginComputePass();
+    pass.SetPipeline(cullingPipeline);
+    pass.SetBindGroup(0, cullingBindGroup);
+    pass.DispatchWorkgroups(gridX, gridY, 1);
+    pass.End();
   }
 
   // render
-  wgpu::CommandEncoder encoder = ctx.device.CreateCommandEncoder();
   {
     wgpu::RenderPassColorAttachment colorAttachment{
         .view = view,
@@ -758,7 +964,7 @@ void Renderer::render(const FlyCamera &camera, float time) {
     wgpu::RenderPassDepthStencilAttachment depthAttachment{
         .view = depthView,
         .depthLoadOp = wgpu::LoadOp::Clear,
-        .depthStoreOp = wgpu::StoreOp::Store,
+        .depthStoreOp = wgpu::StoreOp::Discard,
         .depthClearValue = 1.0f};
 
     wgpu::RenderPassDescriptor passDesc{.colorAttachmentCount = 1,
@@ -770,7 +976,8 @@ void Renderer::render(const FlyCamera &camera, float time) {
     wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&passDesc);
     pass.SetPipeline(renderPipeline);
     pass.SetBindGroup(0, renderBindGroup);
-    pass.DrawIndirect(indirectBuffer, 0);
+    pass.SetIndexBuffer(indexBuffer, wgpu::IndexFormat::Uint32);
+    pass.DrawIndexedIndirect(indirectBuffer, 0);
     pass.End();
   }
 

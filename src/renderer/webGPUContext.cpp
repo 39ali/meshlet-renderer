@@ -47,14 +47,24 @@ WebGPUContext::WebGPUContext(GLFWwindow *windowHandle, uint32_t width,
   });
 
 #ifndef EMSCRIPTEN
-  const char *const enabledToggles[] = {
-      "use_user_defined_labels_in_backend",
-  };
+  const char *const enabledToggles[] = {"use_user_defined_labels_in_backend",
+                                        "disable_symbol_renaming"};
   wgpu::DawnTogglesDescriptor deviceTogglesDesc;
   deviceTogglesDesc.enabledToggles = enabledToggles;
-  deviceTogglesDesc.enabledToggleCount = 1;
+  deviceTogglesDesc.enabledToggleCount = 2;
   desc.nextInChain = &deviceTogglesDesc;
 #endif
+
+  wgpu::Limits supportedLimits;
+  wgpu::Status status = adapter.GetLimits(&supportedLimits);
+  desc.requiredLimits = &supportedLimits;
+
+  std::cout << "maxComputeWorkgroupsPerDimension :"
+            << supportedLimits.maxComputeWorkgroupsPerDimension << std::endl;
+
+  // 3. Request the device with these limits
+  wgpu::DeviceDescriptor deviceDesc = {};
+  deviceDesc.requiredLimits = &supportedLimits;
 
   wgpu::Future f2 = adapter.RequestDevice(
       &desc, wgpu::CallbackMode::WaitAnyOnly,

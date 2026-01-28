@@ -34,6 +34,9 @@ private:
   wgpu::RenderPipeline renderPipeline;
   wgpu::BindGroup renderBindGroup;
 
+  wgpu::ComputePipeline cullingPipeline;
+  wgpu::BindGroup cullingBindGroup;
+
   wgpu::Buffer vertexBuffer;
   wgpu::Buffer meshletBuffer;
   wgpu::Buffer meshletVertexBuffer;
@@ -43,6 +46,9 @@ private:
 
   wgpu::Buffer visibleMeshletBuffer;
   wgpu::Buffer meshInstanceBuffer;
+
+  wgpu::Buffer globalIndexBuffer;
+  wgpu::Buffer indexBuffer;
 
   uint32_t meshletCount;
   uint32_t trianglesCount;

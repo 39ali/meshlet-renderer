@@ -2,16 +2,12 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug App",
-      "type": "cppdbg",
+      "name": "Debug (CodeLLDB)",
+      "type": "lldb",
       "request": "launch",
       "program": "${workspaceFolder}/build/app_native",
-      "args": [],
-      "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
-      "environment": [],
-      "externalConsole": false,
-      "MIMode": "lldb",
+      "stopOnEntry": false,
       "preLaunchTask": "Compile App (Ninja)"
     }
   ]
