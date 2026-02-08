@@ -5,10 +5,6 @@
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 
-struct MeshInstance {
-  glm::mat4 modelMatrix;
-};
-
 class Renderer {
 public:
   Renderer(GLFWwindow *window, uint32_t width, uint32_t height, float xscale,
@@ -34,15 +30,19 @@ private:
   wgpu::RenderPipeline renderPipeline;
   wgpu::BindGroup renderBindGroup;
 
+  wgpu::ComputePipeline cullingPipeline;
+  wgpu::BindGroup cullingBindGroup;
+
   wgpu::Buffer vertexBuffer;
   wgpu::Buffer meshletBuffer;
   wgpu::Buffer meshletVertexBuffer;
   wgpu::Buffer meshletTriangleBuffer;
 
-  wgpu::Buffer indirectBuffer;
-
-  wgpu::Buffer visibleMeshletBuffer;
+  wgpu::Buffer meshletInstanceBuffer;
   wgpu::Buffer meshInstanceBuffer;
+
+  wgpu::Buffer indirectBuffer;
+  wgpu::Buffer visibleMeshletBuffer;
 
   uint32_t meshletCount;
   uint32_t trianglesCount;
