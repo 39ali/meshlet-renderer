@@ -39,12 +39,10 @@ struct Meshlet {
   uint32_t triangleOffset;
   uint32_t vertexCount;
   uint32_t triangleCount;
-  glm::vec4 boundingSphere;
-  glm::vec4 boundingCone;
+  glm::vec2 boundingSphere0;
+  glm::vec2 boundingSphere1;
+  uint32_t boundingCone;
   uint32_t color;
-  uint32_t _pad0;
-  uint32_t _pad1;
-  uint32_t _pad2;
 };
 
 struct MeshInstance {
@@ -174,11 +172,12 @@ void buildMeshlets(const std::vector<Vertex> &vertices,
         &vertices[0].position.x, vertices.size(), sizeof(Vertex));
 
     // todo: make 16bit per element
-    meshletsOut[i].boundingSphere =
-        glm::vec4(b.center[0], b.center[1], b.center[2], b.radius);
-    // todo: make 8bit per element
-    meshletsOut[i].boundingCone = glm::vec4(b.cone_axis[0], b.cone_axis[1],
-                                            b.cone_axis[2], b.cone_cutoff);
+    meshletsOut[i].boundingSphere0 = glm::vec2(b.center[0], b.center[1]);
+    meshletsOut[i].boundingSphere1 = glm::vec2(b.center[2], b.radius);
+
+    meshletsOut[i].boundingCone =
+        uint32_t(b.cone_cutoff_s8) << 24 | uint32_t(b.cone_axis_s8[2]) << 16 |
+        uint32_t(b.cone_axis_s8[1]) << 8 | uint32_t(b.cone_axis_s8[0]);
 
     meshletsOut[i].color = generateRandomColor();
   }
@@ -476,12 +475,10 @@ struct Meshlet {
     triangleOffset : u32,
     vertexCount    : u32,
     triangleCount  : u32,
-    boundingSphere : vec4<f32>,
-    boundingCone   : vec4<f32>,
+    boundingSphere0 : vec2f,
+    boundingSphere1 : vec2f,
+    boundingCone   : u32,
     color:u32, 
-    _pad0:u32,
-    _pad1:u32, 
-    _pad2:u32,
 };
 
 struct MeshInstance {
@@ -757,17 +754,15 @@ struct Vertex {
 };
 
 
-  struct Meshlet {
+struct Meshlet {
     vertexOffset   : u32,
     triangleOffset : u32,
     vertexCount    : u32,
     triangleCount  : u32,
-    boundingSphere : vec4f, // xyz = center, w = radius
-    boundingCone   : vec4f, // xyz = axis, w = cutoff  
+    boundingSphere0 : vec2f,
+    boundingSphere1 : vec2f,
+    boundingCone   : u32,
     color:u32, 
-    _pad0:u32,
-    _pad1:u32, 
-    _pad2:u32,
 };
 
 struct MeshInstance {
@@ -839,13 +834,14 @@ fn main(@builtin(workgroup_id) wgID : vec3<u32>,
     let m = meshlets[instance.meshletID];
     let mesh =meshInstances[instance.meshInstanceID];
 
-    let center_world = mesh.modelMatrix * vec4f(m.boundingSphere.xyz,1.0);
+    let center_world = mesh.modelMatrix * vec4f(m.boundingSphere0,m.boundingSphere1.x,1.0);
    
     let uniformScale = length(mesh.modelMatrix[0].xyz); 
-    let radius = m.boundingSphere.w*uniformScale;
+    let radius = m.boundingSphere1.y*uniformScale;
 
-    let axis   = normalize((mesh.modelMatrix*vec4(m.boundingCone.xyz, 0.0)).xyz);
-    let cutoff = m.boundingCone.w;
+    let axis_unpacked = vec3f(f32(m.boundingCone&0xff)/127.0,f32((m.boundingCone>>8)&0xff)/127.0,f32((m.boundingCone>>16)&0xff)/127.0);
+    let axis   = normalize((mesh.modelMatrix*vec4(axis_unpacked, 0.0)).xyz);
+    let cutoff =f32((m.boundingCone>>24)&0xff)/127.0;
 
     //backface culling
     let v = normalize(center_world.xyz-scene.cameraPos);

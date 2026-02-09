@@ -60,6 +60,8 @@ int main() {
   input.init(window);
   renderer = new Renderer{window, width, height, xscale, yscale};
 
+  camera.position.z = 30;
+
 #ifdef EMSCRIPTEN
   emscripten_set_main_loop(loop, 0, false);
 #else
