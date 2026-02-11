@@ -14,7 +14,10 @@ public:
   void initGui(GLFWwindow *window);
   void renderGui(wgpu::CommandEncoder &encoder, wgpu::TextureView &view);
 
+  void initDepthCopyPipeline();
+  void initHizMipsPipeline();
   void initCullPipeline();
+
   void initRenderPipline();
 
 private:
@@ -43,6 +46,17 @@ private:
 
   wgpu::Buffer indirectBuffer;
   wgpu::Buffer visibleMeshletBuffer;
+
+  wgpu::Texture hizTexture;
+  wgpu::TextureView hizBaseView;
+  std::vector<wgpu::TextureView> hizViews;
+
+  wgpu::ComputePipeline depthCopyPipeline;
+  wgpu::BindGroup depthCopyBindGroup;
+
+  wgpu::ComputePipeline hizGenPipeline;
+  std::vector<wgpu::BindGroup> hizGenBindGroups;
+  bool hasPrevDepth = false;
 
   uint32_t meshletCount;
   uint32_t trianglesCount;

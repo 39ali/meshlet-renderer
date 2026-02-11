@@ -15,7 +15,7 @@ uint32_t height = 720;
 Timer timer{};
 GLFWwindow *window;
 InputManager input;
-FlyCamera camera(45.0f, width / (float)height, 0.1f, 100.0f);
+FlyCamera camera(45.0f, width / (float)height, 0.1f, 1000.0f);
 Renderer *renderer;
 bool isCamMode = false;
 float totatlTime = 0;
