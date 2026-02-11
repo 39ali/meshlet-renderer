@@ -88,7 +88,7 @@ if (ENVIRONMENT_IS_NODE) {
 
 // --pre-jses are emitted after the Module integration code, so that they can
 // refer to Module (if they choose; they can also define Module)
-// include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmpzsrjqkot.js
+// include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmpbem14udf.js
 
   if (!Module['expectedDataFileDownloads']) Module['expectedDataFileDownloads'] = 0;
   Module['expectedDataFileDownloads']++;
@@ -217,25 +217,25 @@ Module['FS_createPath']("/", "assets", true, true);
     }
 
     }
-    loadPackage({"files": [{"filename": "/assets/.DS_Store", "start": 0, "end": 6148}, {"filename": "/assets/train_iteration_30000.splat", "start": 6148, "end": 42996596}], "remote_package_size": 42996596});
+    loadPackage({"files": [{"filename": "/assets/.DS_Store", "start": 0, "end": 6148}, {"filename": "/assets/Box.glb", "start": 6148, "end": 7812}, {"filename": "/assets/Duck.glb", "start": 7812, "end": 128296}], "remote_package_size": 128296});
 
   })();
 
-// end include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmpzsrjqkot.js
-// include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmpnzlbrers.js
+// end include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmpbem14udf.js
+// include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmpx5tpojed.js
 
     // All the pre-js content up to here must remain later on, we need to run
     // it.
     if ((typeof ENVIRONMENT_IS_WASM_WORKER != 'undefined' && ENVIRONMENT_IS_WASM_WORKER) || (typeof ENVIRONMENT_IS_PTHREAD != 'undefined' && ENVIRONMENT_IS_PTHREAD) || (typeof ENVIRONMENT_IS_AUDIO_WORKLET != 'undefined' && ENVIRONMENT_IS_AUDIO_WORKLET)) Module['preRun'] = [];
     var necessaryPreJSTasks = Module['preRun'].slice();
-  // end include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmpnzlbrers.js
-// include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmp4mr55ko6.js
+  // end include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmpx5tpojed.js
+// include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmpzmu9cglw.js
 
     if (!Module['preRun']) throw 'Module.preRun should exist because file support used it; did a pre-js delete it?';
     necessaryPreJSTasks.forEach((task) => {
       if (Module['preRun'].indexOf(task) < 0) throw 'All preRun tasks that exist before user pre-js code should remain after; did you replace Module or modify Module.preRun?';
     });
-  // end include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmp4mr55ko6.js
+  // end include: /var/folders/gy/tq05t4795x54r85bhqvxckg40000gn/T/tmpzmu9cglw.js
 
 
 var arguments_ = [];
@@ -4041,6 +4041,16 @@ async function createWasm() {
   }
   }
 
+  function ___syscall_fstat64(fd, buf) {
+  try {
+  
+      return SYSCALLS.writeStat(buf, FS.fstat(fd));
+    } catch (e) {
+    if (typeof FS == 'undefined' || !(e.name === 'ErrnoError')) throw e;
+    return -e.errno;
+  }
+  }
+
   
   function ___syscall_ioctl(fd, op, varargs) {
   SYSCALLS.varargs = varargs;
@@ -4138,6 +4148,33 @@ async function createWasm() {
   }
   }
 
+  function ___syscall_lstat64(path, buf) {
+  try {
+  
+      path = SYSCALLS.getStr(path);
+      return SYSCALLS.writeStat(buf, FS.lstat(path));
+    } catch (e) {
+    if (typeof FS == 'undefined' || !(e.name === 'ErrnoError')) throw e;
+    return -e.errno;
+  }
+  }
+
+  function ___syscall_newfstatat(dirfd, path, buf, flags) {
+  try {
+  
+      path = SYSCALLS.getStr(path);
+      var nofollow = flags & 256;
+      var allowEmpty = flags & 4096;
+      flags = flags & (~6400);
+      assert(!flags, `unknown flags in __syscall_newfstatat: ${flags}`);
+      path = SYSCALLS.calculateAt(dirfd, path, allowEmpty);
+      return SYSCALLS.writeStat(buf, nofollow ? FS.lstat(path) : FS.stat(path));
+    } catch (e) {
+    if (typeof FS == 'undefined' || !(e.name === 'ErrnoError')) throw e;
+    return -e.errno;
+  }
+  }
+
   
   function ___syscall_openat(dirfd, path, flags, varargs) {
   SYSCALLS.varargs = varargs;
@@ -4147,6 +4184,17 @@ async function createWasm() {
       path = SYSCALLS.calculateAt(dirfd, path);
       var mode = varargs ? syscallGetVarargI() : 0;
       return FS.open(path, flags, mode).fd;
+    } catch (e) {
+    if (typeof FS == 'undefined' || !(e.name === 'ErrnoError')) throw e;
+    return -e.errno;
+  }
+  }
+
+  function ___syscall_stat64(path, buf) {
+  try {
+  
+      path = SYSCALLS.getStr(path);
+      return SYSCALLS.writeStat(buf, FS.stat(path));
     } catch (e) {
     if (typeof FS == 'undefined' || !(e.name === 'ErrnoError')) throw e;
     return -e.errno;
@@ -7485,6 +7533,20 @@ async function createWasm() {
   }
 
   
+  var _emwgpuBufferDestroy = (bufferPtr) => {
+      var buffer = WebGPU.getJsObject(bufferPtr);
+      var onUnmap = WebGPU.Internals.bufferOnUnmaps[bufferPtr];
+      if (onUnmap) {
+        for (var i = 0; i < onUnmap.length; ++i) {
+          onUnmap[i]();
+        }
+        delete WebGPU.Internals.bufferOnUnmaps[bufferPtr];
+      }
+  
+      buffer.destroy();
+    };
+
+  
   var _emwgpuDelete = (ptr) => {
       delete WebGPU.Internals.jsObjects[ptr];
     };
@@ -7818,6 +7880,17 @@ async function createWasm() {
   }
   }
 
+  function _random_get(buffer, size) {
+  try {
+  
+      randomFill(HEAPU8.subarray(buffer, buffer + size));
+      return 0;
+    } catch (e) {
+    if (typeof FS == 'undefined' || !(e.name === 'ErrnoError')) throw e;
+    return e.errno;
+  }
+  }
+
   
   
   var _wgpuBufferGetSize = function(bufferPtr) {
@@ -7942,21 +8015,6 @@ async function createWasm() {
       WebGPU.Internals.jsObjectInsert(ptr, commandEncoder.beginRenderPass(desc));
       return ptr;
     };
-
-  
-  
-  function _wgpuCommandEncoderClearBuffer(encoderPtr, bufferPtr, offset, size) {
-    offset = bigintToI53Checked(offset);
-    size = bigintToI53Checked(size);
-  
-  
-      var commandEncoder = WebGPU.getJsObject(encoderPtr);
-      if (size == -1) size = undefined;
-  
-      var buffer = WebGPU.getJsObject(bufferPtr);
-      commandEncoder.clearBuffer(buffer, offset, size);
-    ;
-  }
 
   
   
@@ -8343,6 +8401,29 @@ async function createWasm() {
   }
 
   
+  var _wgpuQueueWriteTexture = (queuePtr, destinationPtr, data, dataSize, dataLayoutPtr, writeSizePtr) => {
+      var queue = WebGPU.getJsObject(queuePtr);
+  
+      var destination = WebGPU.makeTexelCopyTextureInfo(destinationPtr);
+      var dataLayout = WebGPU.makeTexelCopyBufferLayout(dataLayoutPtr);
+      var writeSize = WebGPU.makeExtent3D(writeSizePtr);
+      // This subarray isn't strictly necessary, but helps work around an issue
+      // where Chromium makes a copy of the entire heap. crbug.com/1134457
+      var subarray = HEAPU8.subarray(data, data + dataSize);
+      queue.writeTexture(destination, subarray, dataLayout, writeSize);
+    };
+
+  
+  var _wgpuRenderPassEncoderDrawIndexed = (passPtr, indexCount, instanceCount, firstIndex, baseVertex, firstInstance) => {
+      assert(indexCount >= 0);
+      assert(instanceCount >= 0);
+      firstIndex >>>= 0;
+      firstInstance >>>= 0;
+      var pass = WebGPU.getJsObject(passPtr);
+      pass.drawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance);
+    };
+
+  
   
   function _wgpuRenderPassEncoderDrawIndirect(passPtr, indirectBufferPtr, indirectOffset) {
     indirectOffset = bigintToI53Checked(indirectOffset);
@@ -8373,10 +8454,62 @@ async function createWasm() {
     };
 
   
+  var _wgpuRenderPassEncoderSetBlendConstant = (passPtr, colorPtr) => {
+      var pass = WebGPU.getJsObject(passPtr);
+      var color = WebGPU.makeColor(colorPtr);
+      pass.setBlendConstant(color);
+    };
+
+  
+  
+  function _wgpuRenderPassEncoderSetIndexBuffer(passPtr, bufferPtr, format, offset, size) {
+    offset = bigintToI53Checked(offset);
+    size = bigintToI53Checked(size);
+  
+  
+      var pass = WebGPU.getJsObject(passPtr);
+      var buffer = WebGPU.getJsObject(bufferPtr);
+      if (size == -1) size = undefined;
+      pass.setIndexBuffer(buffer, WebGPU.IndexFormat[format], offset, size);
+    ;
+  }
+
+  
   var _wgpuRenderPassEncoderSetPipeline = (passPtr, pipelinePtr) => {
       var pass = WebGPU.getJsObject(passPtr);
       var pipeline = WebGPU.getJsObject(pipelinePtr);
       pass.setPipeline(pipeline);
+    };
+
+  
+  var _wgpuRenderPassEncoderSetScissorRect = (passPtr, x, y, w, h) => {
+      assert(x >= 0);
+      assert(y >= 0);
+      assert(w >= 0);
+      assert(h >= 0);
+      var pass = WebGPU.getJsObject(passPtr);
+      pass.setScissorRect(x, y, w, h);
+    };
+
+  
+  
+  function _wgpuRenderPassEncoderSetVertexBuffer(passPtr, slot, bufferPtr, offset, size) {
+    offset = bigintToI53Checked(offset);
+    size = bigintToI53Checked(size);
+  
+  
+      assert(slot >= 0);
+      var pass = WebGPU.getJsObject(passPtr);
+      var buffer = WebGPU.getJsObject(bufferPtr);
+      if (size == -1) size = undefined;
+      pass.setVertexBuffer(slot, buffer, offset, size);
+    ;
+  }
+
+  
+  var _wgpuRenderPassEncoderSetViewport = (passPtr, x, y, w, h, minDepth, maxDepth) => {
+      var pass = WebGPU.getJsObject(passPtr);
+      pass.setViewport(x, y, w, h, minDepth, maxDepth);
     };
 
   
@@ -8494,6 +8627,12 @@ async function createWasm() {
       var ptr = _emwgpuCreateTextureView(0);
       WebGPU.Internals.jsObjectInsert(ptr, texture.createView(desc));
       return ptr;
+    };
+
+  
+  var _wgpuTextureGetMipLevelCount = (texturePtr) => {
+      var texture = WebGPU.getJsObject(texturePtr);
+      return texture.mipLevelCount;
     };
 
 
@@ -9330,15 +9469,15 @@ function checkIncomingModuleAPI() {
   ignoredModuleProp('fetchSettings');
 }
 var ASM_CONSTS = {
-  131772: () => { self.specialHTMLTargets && (specialHTMLTargets["!canvas"] = Module.canvas) }
+  238684: () => { self.specialHTMLTargets && (specialHTMLTargets["!canvas"] = Module.canvas) }
 };
 function ImGui_ImplGlfw_EmscriptenOpenURL(url) { url = url ? UTF8ToString(url) : null; if (url) window.open(url, '_blank'); }
 
 // Imports from the Wasm binary.
+var _free = makeInvalidEarlyAccess('_free');
+var _malloc = makeInvalidEarlyAccess('_malloc');
 var _main = Module['_main'] = makeInvalidEarlyAccess('_main');
 var _fflush = makeInvalidEarlyAccess('_fflush');
-var _malloc = makeInvalidEarlyAccess('_malloc');
-var _free = makeInvalidEarlyAccess('_free');
 var _emwgpuCreateBindGroup = makeInvalidEarlyAccess('_emwgpuCreateBindGroup');
 var _emwgpuCreateBindGroupLayout = makeInvalidEarlyAccess('_emwgpuCreateBindGroupLayout');
 var _emwgpuCreateCommandBuffer = makeInvalidEarlyAccess('_emwgpuCreateCommandBuffer');
@@ -9388,26 +9527,29 @@ var ___cxa_increment_exception_refcount = makeInvalidEarlyAccess('___cxa_increme
 var ___get_exception_message = makeInvalidEarlyAccess('___get_exception_message');
 var ___cxa_can_catch = makeInvalidEarlyAccess('___cxa_can_catch');
 var ___cxa_get_exception_ptr = makeInvalidEarlyAccess('___cxa_get_exception_ptr');
-var dynCall_ii = makeInvalidEarlyAccess('dynCall_ii');
-var dynCall_viiiii = makeInvalidEarlyAccess('dynCall_viiiii');
-var dynCall_viiii = makeInvalidEarlyAccess('dynCall_viiii');
-var dynCall_vidd = makeInvalidEarlyAccess('dynCall_vidd');
-var dynCall_v = makeInvalidEarlyAccess('dynCall_v');
-var dynCall_viii = makeInvalidEarlyAccess('dynCall_viii');
-var dynCall_iii = makeInvalidEarlyAccess('dynCall_iii');
-var dynCall_vii = makeInvalidEarlyAccess('dynCall_vii');
-var dynCall_iiii = makeInvalidEarlyAccess('dynCall_iiii');
 var dynCall_vi = makeInvalidEarlyAccess('dynCall_vi');
-var dynCall_viji = makeInvalidEarlyAccess('dynCall_viji');
-var dynCall_iiiiii = makeInvalidEarlyAccess('dynCall_iiiiii');
-var dynCall_iiiiiiii = makeInvalidEarlyAccess('dynCall_iiiiiiii');
+var dynCall_viii = makeInvalidEarlyAccess('dynCall_viii');
+var dynCall_ii = makeInvalidEarlyAccess('dynCall_ii');
+var dynCall_iii = makeInvalidEarlyAccess('dynCall_iii');
 var dynCall_iiiii = makeInvalidEarlyAccess('dynCall_iiiii');
+var dynCall_iiii = makeInvalidEarlyAccess('dynCall_iiii');
+var dynCall_iiiiiiiiii = makeInvalidEarlyAccess('dynCall_iiiiiiiiii');
+var dynCall_iiiiiiiii = makeInvalidEarlyAccess('dynCall_iiiiiiiii');
+var dynCall_viiiiii = makeInvalidEarlyAccess('dynCall_viiiiii');
+var dynCall_iiiiii = makeInvalidEarlyAccess('dynCall_iiiiii');
+var dynCall_vii = makeInvalidEarlyAccess('dynCall_vii');
+var dynCall_v = makeInvalidEarlyAccess('dynCall_v');
+var dynCall_viiii = makeInvalidEarlyAccess('dynCall_viiii');
+var dynCall_iiiiiiiiiii = makeInvalidEarlyAccess('dynCall_iiiiiiiiiii');
+var dynCall_viiiii = makeInvalidEarlyAccess('dynCall_viiiii');
+var dynCall_vidd = makeInvalidEarlyAccess('dynCall_vidd');
+var dynCall_iiiiiiii = makeInvalidEarlyAccess('dynCall_iiiiiiii');
+var dynCall_viji = makeInvalidEarlyAccess('dynCall_viji');
 var dynCall_iiiiiii = makeInvalidEarlyAccess('dynCall_iiiiiii');
 var dynCall_jiji = makeInvalidEarlyAccess('dynCall_jiji');
 var dynCall_iidiiii = makeInvalidEarlyAccess('dynCall_iidiiii');
 var dynCall_j = makeInvalidEarlyAccess('dynCall_j');
 var dynCall_viijii = makeInvalidEarlyAccess('dynCall_viijii');
-var dynCall_iiiiiiiiiii = makeInvalidEarlyAccess('dynCall_iiiiiiiiiii');
 var dynCall_jiiii = makeInvalidEarlyAccess('dynCall_jiiii');
 var dynCall_iiiiiiiiiiiii = makeInvalidEarlyAccess('dynCall_iiiiiiiiiiiii');
 var dynCall_fiii = makeInvalidEarlyAccess('dynCall_fiii');
@@ -9417,12 +9559,10 @@ var dynCall_viiiiiii = makeInvalidEarlyAccess('dynCall_viiiiiii');
 var dynCall_iiiiiiiiiiii = makeInvalidEarlyAccess('dynCall_iiiiiiiiiiii');
 var dynCall_viiiiiiiiii = makeInvalidEarlyAccess('dynCall_viiiiiiiiii');
 var dynCall_viiiiiiiiiiiiiii = makeInvalidEarlyAccess('dynCall_viiiiiiiiiiiiiii');
-var dynCall_iiiiiiiii = makeInvalidEarlyAccess('dynCall_iiiiiiiii');
 var dynCall_iiiiij = makeInvalidEarlyAccess('dynCall_iiiiij');
 var dynCall_iiiiid = makeInvalidEarlyAccess('dynCall_iiiiid');
 var dynCall_iiiiijj = makeInvalidEarlyAccess('dynCall_iiiiijj');
 var dynCall_iiiiiijj = makeInvalidEarlyAccess('dynCall_iiiiiijj');
-var dynCall_viiiiii = makeInvalidEarlyAccess('dynCall_viiiiii');
 var _asyncify_start_unwind = makeInvalidEarlyAccess('_asyncify_start_unwind');
 var _asyncify_stop_unwind = makeInvalidEarlyAccess('_asyncify_stop_unwind');
 var _asyncify_start_rewind = makeInvalidEarlyAccess('_asyncify_start_rewind');
@@ -9433,10 +9573,10 @@ var wasmMemory = makeInvalidEarlyAccess('wasmMemory');
 var wasmTable = makeInvalidEarlyAccess('wasmTable');
 
 function assignWasmExports(wasmExports) {
+  assert(typeof wasmExports['free'] != 'undefined', 'missing Wasm export: free');
+  assert(typeof wasmExports['malloc'] != 'undefined', 'missing Wasm export: malloc');
   assert(typeof wasmExports['main'] != 'undefined', 'missing Wasm export: main');
   assert(typeof wasmExports['fflush'] != 'undefined', 'missing Wasm export: fflush');
-  assert(typeof wasmExports['malloc'] != 'undefined', 'missing Wasm export: malloc');
-  assert(typeof wasmExports['free'] != 'undefined', 'missing Wasm export: free');
   assert(typeof wasmExports['emwgpuCreateBindGroup'] != 'undefined', 'missing Wasm export: emwgpuCreateBindGroup');
   assert(typeof wasmExports['emwgpuCreateBindGroupLayout'] != 'undefined', 'missing Wasm export: emwgpuCreateBindGroupLayout');
   assert(typeof wasmExports['emwgpuCreateCommandBuffer'] != 'undefined', 'missing Wasm export: emwgpuCreateCommandBuffer');
@@ -9486,26 +9626,29 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['__get_exception_message'] != 'undefined', 'missing Wasm export: __get_exception_message');
   assert(typeof wasmExports['__cxa_can_catch'] != 'undefined', 'missing Wasm export: __cxa_can_catch');
   assert(typeof wasmExports['__cxa_get_exception_ptr'] != 'undefined', 'missing Wasm export: __cxa_get_exception_ptr');
-  assert(typeof wasmExports['dynCall_ii'] != 'undefined', 'missing Wasm export: dynCall_ii');
-  assert(typeof wasmExports['dynCall_viiiii'] != 'undefined', 'missing Wasm export: dynCall_viiiii');
-  assert(typeof wasmExports['dynCall_viiii'] != 'undefined', 'missing Wasm export: dynCall_viiii');
-  assert(typeof wasmExports['dynCall_vidd'] != 'undefined', 'missing Wasm export: dynCall_vidd');
-  assert(typeof wasmExports['dynCall_v'] != 'undefined', 'missing Wasm export: dynCall_v');
-  assert(typeof wasmExports['dynCall_viii'] != 'undefined', 'missing Wasm export: dynCall_viii');
-  assert(typeof wasmExports['dynCall_iii'] != 'undefined', 'missing Wasm export: dynCall_iii');
-  assert(typeof wasmExports['dynCall_vii'] != 'undefined', 'missing Wasm export: dynCall_vii');
-  assert(typeof wasmExports['dynCall_iiii'] != 'undefined', 'missing Wasm export: dynCall_iiii');
   assert(typeof wasmExports['dynCall_vi'] != 'undefined', 'missing Wasm export: dynCall_vi');
-  assert(typeof wasmExports['dynCall_viji'] != 'undefined', 'missing Wasm export: dynCall_viji');
-  assert(typeof wasmExports['dynCall_iiiiii'] != 'undefined', 'missing Wasm export: dynCall_iiiiii');
-  assert(typeof wasmExports['dynCall_iiiiiiii'] != 'undefined', 'missing Wasm export: dynCall_iiiiiiii');
+  assert(typeof wasmExports['dynCall_viii'] != 'undefined', 'missing Wasm export: dynCall_viii');
+  assert(typeof wasmExports['dynCall_ii'] != 'undefined', 'missing Wasm export: dynCall_ii');
+  assert(typeof wasmExports['dynCall_iii'] != 'undefined', 'missing Wasm export: dynCall_iii');
   assert(typeof wasmExports['dynCall_iiiii'] != 'undefined', 'missing Wasm export: dynCall_iiiii');
+  assert(typeof wasmExports['dynCall_iiii'] != 'undefined', 'missing Wasm export: dynCall_iiii');
+  assert(typeof wasmExports['dynCall_iiiiiiiiii'] != 'undefined', 'missing Wasm export: dynCall_iiiiiiiiii');
+  assert(typeof wasmExports['dynCall_iiiiiiiii'] != 'undefined', 'missing Wasm export: dynCall_iiiiiiiii');
+  assert(typeof wasmExports['dynCall_viiiiii'] != 'undefined', 'missing Wasm export: dynCall_viiiiii');
+  assert(typeof wasmExports['dynCall_iiiiii'] != 'undefined', 'missing Wasm export: dynCall_iiiiii');
+  assert(typeof wasmExports['dynCall_vii'] != 'undefined', 'missing Wasm export: dynCall_vii');
+  assert(typeof wasmExports['dynCall_v'] != 'undefined', 'missing Wasm export: dynCall_v');
+  assert(typeof wasmExports['dynCall_viiii'] != 'undefined', 'missing Wasm export: dynCall_viiii');
+  assert(typeof wasmExports['dynCall_iiiiiiiiiii'] != 'undefined', 'missing Wasm export: dynCall_iiiiiiiiiii');
+  assert(typeof wasmExports['dynCall_viiiii'] != 'undefined', 'missing Wasm export: dynCall_viiiii');
+  assert(typeof wasmExports['dynCall_vidd'] != 'undefined', 'missing Wasm export: dynCall_vidd');
+  assert(typeof wasmExports['dynCall_iiiiiiii'] != 'undefined', 'missing Wasm export: dynCall_iiiiiiii');
+  assert(typeof wasmExports['dynCall_viji'] != 'undefined', 'missing Wasm export: dynCall_viji');
   assert(typeof wasmExports['dynCall_iiiiiii'] != 'undefined', 'missing Wasm export: dynCall_iiiiiii');
   assert(typeof wasmExports['dynCall_jiji'] != 'undefined', 'missing Wasm export: dynCall_jiji');
   assert(typeof wasmExports['dynCall_iidiiii'] != 'undefined', 'missing Wasm export: dynCall_iidiiii');
   assert(typeof wasmExports['dynCall_j'] != 'undefined', 'missing Wasm export: dynCall_j');
   assert(typeof wasmExports['dynCall_viijii'] != 'undefined', 'missing Wasm export: dynCall_viijii');
-  assert(typeof wasmExports['dynCall_iiiiiiiiiii'] != 'undefined', 'missing Wasm export: dynCall_iiiiiiiiiii');
   assert(typeof wasmExports['dynCall_jiiii'] != 'undefined', 'missing Wasm export: dynCall_jiiii');
   assert(typeof wasmExports['dynCall_iiiiiiiiiiiii'] != 'undefined', 'missing Wasm export: dynCall_iiiiiiiiiiiii');
   assert(typeof wasmExports['dynCall_fiii'] != 'undefined', 'missing Wasm export: dynCall_fiii');
@@ -9515,22 +9658,20 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['dynCall_iiiiiiiiiiii'] != 'undefined', 'missing Wasm export: dynCall_iiiiiiiiiiii');
   assert(typeof wasmExports['dynCall_viiiiiiiiii'] != 'undefined', 'missing Wasm export: dynCall_viiiiiiiiii');
   assert(typeof wasmExports['dynCall_viiiiiiiiiiiiiii'] != 'undefined', 'missing Wasm export: dynCall_viiiiiiiiiiiiiii');
-  assert(typeof wasmExports['dynCall_iiiiiiiii'] != 'undefined', 'missing Wasm export: dynCall_iiiiiiiii');
   assert(typeof wasmExports['dynCall_iiiiij'] != 'undefined', 'missing Wasm export: dynCall_iiiiij');
   assert(typeof wasmExports['dynCall_iiiiid'] != 'undefined', 'missing Wasm export: dynCall_iiiiid');
   assert(typeof wasmExports['dynCall_iiiiijj'] != 'undefined', 'missing Wasm export: dynCall_iiiiijj');
   assert(typeof wasmExports['dynCall_iiiiiijj'] != 'undefined', 'missing Wasm export: dynCall_iiiiiijj');
-  assert(typeof wasmExports['dynCall_viiiiii'] != 'undefined', 'missing Wasm export: dynCall_viiiiii');
   assert(typeof wasmExports['asyncify_start_unwind'] != 'undefined', 'missing Wasm export: asyncify_start_unwind');
   assert(typeof wasmExports['asyncify_stop_unwind'] != 'undefined', 'missing Wasm export: asyncify_stop_unwind');
   assert(typeof wasmExports['asyncify_start_rewind'] != 'undefined', 'missing Wasm export: asyncify_start_rewind');
   assert(typeof wasmExports['asyncify_stop_rewind'] != 'undefined', 'missing Wasm export: asyncify_stop_rewind');
   assert(typeof wasmExports['memory'] != 'undefined', 'missing Wasm export: memory');
   assert(typeof wasmExports['__indirect_function_table'] != 'undefined', 'missing Wasm export: __indirect_function_table');
+  _free = createExportWrapper('free', 1);
+  _malloc = createExportWrapper('malloc', 1);
   _main = Module['_main'] = createExportWrapper('main', 2);
   _fflush = createExportWrapper('fflush', 1);
-  _malloc = createExportWrapper('malloc', 1);
-  _free = createExportWrapper('free', 1);
   _emwgpuCreateBindGroup = createExportWrapper('emwgpuCreateBindGroup', 1);
   _emwgpuCreateBindGroupLayout = createExportWrapper('emwgpuCreateBindGroupLayout', 1);
   _emwgpuCreateCommandBuffer = createExportWrapper('emwgpuCreateCommandBuffer', 1);
@@ -9580,26 +9721,29 @@ function assignWasmExports(wasmExports) {
   ___get_exception_message = createExportWrapper('__get_exception_message', 3);
   ___cxa_can_catch = createExportWrapper('__cxa_can_catch', 3);
   ___cxa_get_exception_ptr = createExportWrapper('__cxa_get_exception_ptr', 1);
-  dynCall_ii = dynCalls['ii'] = createExportWrapper('dynCall_ii', 2);
-  dynCall_viiiii = dynCalls['viiiii'] = createExportWrapper('dynCall_viiiii', 6);
-  dynCall_viiii = dynCalls['viiii'] = createExportWrapper('dynCall_viiii', 5);
-  dynCall_vidd = dynCalls['vidd'] = createExportWrapper('dynCall_vidd', 4);
-  dynCall_v = dynCalls['v'] = createExportWrapper('dynCall_v', 1);
-  dynCall_viii = dynCalls['viii'] = createExportWrapper('dynCall_viii', 4);
-  dynCall_iii = dynCalls['iii'] = createExportWrapper('dynCall_iii', 3);
-  dynCall_vii = dynCalls['vii'] = createExportWrapper('dynCall_vii', 3);
-  dynCall_iiii = dynCalls['iiii'] = createExportWrapper('dynCall_iiii', 4);
   dynCall_vi = dynCalls['vi'] = createExportWrapper('dynCall_vi', 2);
-  dynCall_viji = dynCalls['viji'] = createExportWrapper('dynCall_viji', 4);
-  dynCall_iiiiii = dynCalls['iiiiii'] = createExportWrapper('dynCall_iiiiii', 6);
-  dynCall_iiiiiiii = dynCalls['iiiiiiii'] = createExportWrapper('dynCall_iiiiiiii', 8);
+  dynCall_viii = dynCalls['viii'] = createExportWrapper('dynCall_viii', 4);
+  dynCall_ii = dynCalls['ii'] = createExportWrapper('dynCall_ii', 2);
+  dynCall_iii = dynCalls['iii'] = createExportWrapper('dynCall_iii', 3);
   dynCall_iiiii = dynCalls['iiiii'] = createExportWrapper('dynCall_iiiii', 5);
+  dynCall_iiii = dynCalls['iiii'] = createExportWrapper('dynCall_iiii', 4);
+  dynCall_iiiiiiiiii = dynCalls['iiiiiiiiii'] = createExportWrapper('dynCall_iiiiiiiiii', 10);
+  dynCall_iiiiiiiii = dynCalls['iiiiiiiii'] = createExportWrapper('dynCall_iiiiiiiii', 9);
+  dynCall_viiiiii = dynCalls['viiiiii'] = createExportWrapper('dynCall_viiiiii', 7);
+  dynCall_iiiiii = dynCalls['iiiiii'] = createExportWrapper('dynCall_iiiiii', 6);
+  dynCall_vii = dynCalls['vii'] = createExportWrapper('dynCall_vii', 3);
+  dynCall_v = dynCalls['v'] = createExportWrapper('dynCall_v', 1);
+  dynCall_viiii = dynCalls['viiii'] = createExportWrapper('dynCall_viiii', 5);
+  dynCall_iiiiiiiiiii = dynCalls['iiiiiiiiiii'] = createExportWrapper('dynCall_iiiiiiiiiii', 11);
+  dynCall_viiiii = dynCalls['viiiii'] = createExportWrapper('dynCall_viiiii', 6);
+  dynCall_vidd = dynCalls['vidd'] = createExportWrapper('dynCall_vidd', 4);
+  dynCall_iiiiiiii = dynCalls['iiiiiiii'] = createExportWrapper('dynCall_iiiiiiii', 8);
+  dynCall_viji = dynCalls['viji'] = createExportWrapper('dynCall_viji', 4);
   dynCall_iiiiiii = dynCalls['iiiiiii'] = createExportWrapper('dynCall_iiiiiii', 7);
   dynCall_jiji = dynCalls['jiji'] = createExportWrapper('dynCall_jiji', 4);
   dynCall_iidiiii = dynCalls['iidiiii'] = createExportWrapper('dynCall_iidiiii', 7);
   dynCall_j = dynCalls['j'] = createExportWrapper('dynCall_j', 1);
   dynCall_viijii = dynCalls['viijii'] = createExportWrapper('dynCall_viijii', 6);
-  dynCall_iiiiiiiiiii = dynCalls['iiiiiiiiiii'] = createExportWrapper('dynCall_iiiiiiiiiii', 11);
   dynCall_jiiii = dynCalls['jiiii'] = createExportWrapper('dynCall_jiiii', 5);
   dynCall_iiiiiiiiiiiii = dynCalls['iiiiiiiiiiiii'] = createExportWrapper('dynCall_iiiiiiiiiiiii', 13);
   dynCall_fiii = dynCalls['fiii'] = createExportWrapper('dynCall_fiii', 4);
@@ -9609,12 +9753,10 @@ function assignWasmExports(wasmExports) {
   dynCall_iiiiiiiiiiii = dynCalls['iiiiiiiiiiii'] = createExportWrapper('dynCall_iiiiiiiiiiii', 12);
   dynCall_viiiiiiiiii = dynCalls['viiiiiiiiii'] = createExportWrapper('dynCall_viiiiiiiiii', 11);
   dynCall_viiiiiiiiiiiiiii = dynCalls['viiiiiiiiiiiiiii'] = createExportWrapper('dynCall_viiiiiiiiiiiiiii', 16);
-  dynCall_iiiiiiiii = dynCalls['iiiiiiiii'] = createExportWrapper('dynCall_iiiiiiiii', 9);
   dynCall_iiiiij = dynCalls['iiiiij'] = createExportWrapper('dynCall_iiiiij', 6);
   dynCall_iiiiid = dynCalls['iiiiid'] = createExportWrapper('dynCall_iiiiid', 6);
   dynCall_iiiiijj = dynCalls['iiiiijj'] = createExportWrapper('dynCall_iiiiijj', 7);
   dynCall_iiiiiijj = dynCalls['iiiiiijj'] = createExportWrapper('dynCall_iiiiiijj', 8);
-  dynCall_viiiiii = dynCalls['viiiiii'] = createExportWrapper('dynCall_viiiiii', 7);
   _asyncify_start_unwind = createExportWrapper('asyncify_start_unwind', 1);
   _asyncify_stop_unwind = createExportWrapper('asyncify_stop_unwind', 0);
   _asyncify_start_rewind = createExportWrapper('asyncify_start_rewind', 1);
@@ -9647,9 +9789,17 @@ var wasmImports = {
   /** @export */
   __syscall_fcntl64: ___syscall_fcntl64,
   /** @export */
+  __syscall_fstat64: ___syscall_fstat64,
+  /** @export */
   __syscall_ioctl: ___syscall_ioctl,
   /** @export */
+  __syscall_lstat64: ___syscall_lstat64,
+  /** @export */
+  __syscall_newfstatat: ___syscall_newfstatat,
+  /** @export */
   __syscall_openat: ___syscall_openat,
+  /** @export */
+  __syscall_stat64: ___syscall_stat64,
   /** @export */
   _abort_js: __abort_js,
   /** @export */
@@ -9757,6 +9907,8 @@ var wasmImports = {
   /** @export */
   emwgpuAdapterRequestDevice: _emwgpuAdapterRequestDevice,
   /** @export */
+  emwgpuBufferDestroy: _emwgpuBufferDestroy,
+  /** @export */
   emwgpuDelete: _emwgpuDelete,
   /** @export */
   emwgpuDeviceCreateBuffer: _emwgpuDeviceCreateBuffer,
@@ -9831,13 +9983,15 @@ var wasmImports = {
   /** @export */
   invoke_viiiiiiiiiiiiiii,
   /** @export */
+  invoke_viijii,
+  /** @export */
+  random_get: _random_get,
+  /** @export */
   wgpuBufferGetSize: _wgpuBufferGetSize,
   /** @export */
   wgpuCommandEncoderBeginComputePass: _wgpuCommandEncoderBeginComputePass,
   /** @export */
   wgpuCommandEncoderBeginRenderPass: _wgpuCommandEncoderBeginRenderPass,
-  /** @export */
-  wgpuCommandEncoderClearBuffer: _wgpuCommandEncoderClearBuffer,
   /** @export */
   wgpuCommandEncoderFinish: _wgpuCommandEncoderFinish,
   /** @export */
@@ -9871,19 +10025,35 @@ var wasmImports = {
   /** @export */
   wgpuQueueWriteBuffer: _wgpuQueueWriteBuffer,
   /** @export */
+  wgpuQueueWriteTexture: _wgpuQueueWriteTexture,
+  /** @export */
+  wgpuRenderPassEncoderDrawIndexed: _wgpuRenderPassEncoderDrawIndexed,
+  /** @export */
   wgpuRenderPassEncoderDrawIndirect: _wgpuRenderPassEncoderDrawIndirect,
   /** @export */
   wgpuRenderPassEncoderEnd: _wgpuRenderPassEncoderEnd,
   /** @export */
   wgpuRenderPassEncoderSetBindGroup: _wgpuRenderPassEncoderSetBindGroup,
   /** @export */
+  wgpuRenderPassEncoderSetBlendConstant: _wgpuRenderPassEncoderSetBlendConstant,
+  /** @export */
+  wgpuRenderPassEncoderSetIndexBuffer: _wgpuRenderPassEncoderSetIndexBuffer,
+  /** @export */
   wgpuRenderPassEncoderSetPipeline: _wgpuRenderPassEncoderSetPipeline,
+  /** @export */
+  wgpuRenderPassEncoderSetScissorRect: _wgpuRenderPassEncoderSetScissorRect,
+  /** @export */
+  wgpuRenderPassEncoderSetVertexBuffer: _wgpuRenderPassEncoderSetVertexBuffer,
+  /** @export */
+  wgpuRenderPassEncoderSetViewport: _wgpuRenderPassEncoderSetViewport,
   /** @export */
   wgpuSurfaceConfigure: _wgpuSurfaceConfigure,
   /** @export */
   wgpuSurfaceGetCurrentTexture: _wgpuSurfaceGetCurrentTexture,
   /** @export */
-  wgpuTextureCreateView: _wgpuTextureCreateView
+  wgpuTextureCreateView: _wgpuTextureCreateView,
+  /** @export */
+  wgpuTextureGetMipLevelCount: _wgpuTextureGetMipLevelCount
 };
 
 function invoke_j(index) {
@@ -9968,6 +10138,17 @@ function invoke_iiii(index,a1,a2,a3) {
   var sp = stackSave();
   try {
     return dynCall_iiii(index,a1,a2,a3);
+  } catch(e) {
+    stackRestore(sp);
+    if (!(e instanceof EmscriptenEH)) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viijii(index,a1,a2,a3,a4,a5) {
+  var sp = stackSave();
+  try {
+    dynCall_viijii(index,a1,a2,a3,a4,a5);
   } catch(e) {
     stackRestore(sp);
     if (!(e instanceof EmscriptenEH)) throw e;

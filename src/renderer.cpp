@@ -332,7 +332,7 @@ Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
   std::vector<MeshInstance> meshInstances;
   {
     glm::mat4 scaleMat = glm::scale(glm::mat4(1.0f), glm::vec3(0.02f));
-    uint32_t instanceCount = 200000;
+    uint32_t instanceCount = 100000;
     float spacing = 3.0f;
     int gridSize =
         static_cast<int>(std::ceil(std::pow(instanceCount, 1.0 / 3.0)));
@@ -402,7 +402,8 @@ Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
     trianglesCount += meshlet.triangleCount;
   }
 
-  std::cout << "avgMeshletTriangleCount: " << trianglesCount / i << std::endl;
+  std::cout << "avgMeshletTriangleCount: " << trianglesCount / meshlets.size()
+            << std::endl;
   std::cout << "maxMeshletTriangleCount: " << maxMeshletTriangleCount
             << std::endl;
   std::cout << "meshletCount :" << meshletCount << std::endl;
