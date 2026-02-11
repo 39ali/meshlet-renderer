@@ -60,7 +60,7 @@ int main() {
   input.init(window);
   renderer = new Renderer{window, width, height, xscale, yscale};
 
-  camera.position.z = 200;
+  camera.position.z = 150;
   camera.position.x = 20;
 
 #ifdef EMSCRIPTEN

@@ -42,7 +42,7 @@
     {
       "label": "Compile App Wasm",
       "type": "shell",
-      "command": "emcmake cmake -B build-web && cmake --build build-web",
+      "command": "emcmake cmake -B build-web -DCMAKE_BUILD_TYPE=Release && cmake --build build-web --config Release",
       "args": [],
       "group": {
         "kind": "build",
