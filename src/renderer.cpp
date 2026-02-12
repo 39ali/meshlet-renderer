@@ -1348,7 +1348,7 @@ void Renderer::render(const FlyCamera &camera, float time) {
 
     readbackBuffer.MapAsync(
         wgpu::MapMode::Read, 0, indirectBuffer.GetSize(),
-        wgpu::CallbackMode::AllowProcessEvents,
+        wgpu::CallbackMode::AllowSpontaneous,
         [&](wgpu::MapAsyncStatus status, wgpu::StringView message) {
           if (status != wgpu::MapAsyncStatus::Success)
             return;
