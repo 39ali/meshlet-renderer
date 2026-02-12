@@ -1,15 +1,21 @@
-<!-- <video src="https://github.com/39ali/gaussian-splatting/tree/main/doc/output.mp4" width="320" height="240" controls></video>
 
-implemenation of [gaussian splatting paper](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/), this also implements gpu radix sort for splats sorting in WebGpu for realtime rendering, gaussians are packed to 40bytes since we only need them for rendering and not ML.
+Meshlet renderer experiment using WebGPU for rendering millions of triangles.
 
+### Features
+- Frustum culling
+- Backface culling
+- Occlusion culling using a hierarchical Z-buffer
+- GPU-based rendering
 
-
-https://github.com/user-attachments/assets/45cf9871-663b-43d8-a644-4508e949a5c5
+### Things to Improve
+- Add meshlet LOD.
+- Add mesh instance culling. Instead of culling meshlets first, attempt to cull the mesh instance. This could potentially save time by skipping meshlet culling if the mesh is culled.
+- Since WebGPU doesn't support MultiDrawIndirect, the indirect draw vertex count is set to the maximum number of vertices per meshlet (`maxTriPerMeshlet * 3`). This wastes some GPU time.
 
 
 
 ## building
-you can run it natively by building using cmake or on [web](https://39ali.github.io/gaussian-splatting/)
+you can run it natively by building using cmake or on [web](https://39ali.github.io/meshlet-renderer/)
 
 ### controls
-hold shift and use mouse + wasd for movement -->
+hold shift and use mouse + WASD for movement
