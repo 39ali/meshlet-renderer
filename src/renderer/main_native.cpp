@@ -35,9 +35,6 @@ void loop() {
   if (isCamMode)
     camera.update(input, dt);
 
-  // glm::mat4 view = camera.getViewMatrix();
-  // glm::mat4 proj = camera.getProjectionMatrix();
-  // std::cout << totatlTime << std::endl;
   renderer->render(camera, totatlTime);
 
   if (input.isKeyPressed(GLFW_KEY_ESCAPE)) {
@@ -45,6 +42,10 @@ void loop() {
   }
 
   input.update();
+
+#ifdef __EMSCRIPTEN__
+  emscripten_sleep(0);
+#endif
 }
 
 int main() {
