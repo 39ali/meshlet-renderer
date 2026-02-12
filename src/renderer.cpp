@@ -275,11 +275,11 @@ Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
   }
 
   {
-    wgpu::BufferDescriptor indirectDesc{.label = "Indirect Draw Buffer",
-                                        .usage = wgpu::BufferUsage::Indirect |
-                                                 wgpu::BufferUsage::Storage |
-                                                 wgpu::BufferUsage::CopyDst,
-                                        .size = sizeof(uint32_t) * 4};
+    wgpu::BufferDescriptor indirectDesc{
+        .label = "Indirect Draw Buffer",
+        .usage = wgpu::BufferUsage::Indirect | wgpu::BufferUsage::Storage |
+                 wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::CopySrc,
+        .size = sizeof(uint32_t) * 4};
 
     indirectBuffer = ctx.device.CreateBuffer(&indirectDesc);
   }
@@ -407,14 +407,24 @@ Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
   std::cout << "maxMeshletTriangleCount: " << maxMeshletTriangleCount
             << std::endl;
   std::cout << "meshletCount :" << meshletCount << std::endl;
+  std::cout << "vertices count :" << vertices.size() << std::endl;
   std::cout << "triangles count :" << trianglesCount * meshInstances.size()
             << std::endl;
-  std::cout << "vertices count :" << vertices.size() << std::endl;
+  std::cout << "rendered triangles count :"
+            << maxMeshletTriangleCount * meshInstances.size() << std::endl;
 
   initCullPipeline();
   initDepthCopyPipeline();
   initHizMipsPipeline();
   initRenderPipline();
+
+  {
+    wgpu::BufferDescriptor desc{};
+    desc.size = indirectBuffer.GetSize();
+    desc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
+
+    readbackBuffer = ctx.device.CreateBuffer(&desc);
+  }
 }
 
 void Renderer::initDepthCopyPipeline() {
@@ -1321,12 +1331,37 @@ void Renderer::render(const FlyCamera &camera, float time) {
     hasPrevDepth = true;
   }
 
+  if (!readbackPending) {
+    encoder.CopyBufferToBuffer(indirectBuffer, 0, readbackBuffer, 0,
+                               indirectBuffer.GetSize());
+  }
+
   // gui pass
   renderGui(encoder, view);
 
   wgpu::CommandBuffer cmd = encoder.Finish();
 
   ctx.queue.Submit(1, &cmd);
+
+  if (!readbackPending) {
+    readbackPending = true;
+
+    readbackBuffer.MapAsync(
+        wgpu::MapMode::Read, 0, indirectBuffer.GetSize(),
+        wgpu::CallbackMode::AllowProcessEvents,
+        [&](wgpu::MapAsyncStatus status, wgpu::StringView message) {
+          if (status != wgpu::MapAsyncStatus::Success)
+            return;
+
+          const void *data =
+              readbackBuffer.GetConstMappedRange(0, indirectBuffer.GetSize());
+          const uint32_t *indirect = static_cast<const uint32_t *>(data);
+
+          renderedMeshletsCount = indirect[1];
+          readbackBuffer.Unmap();
+          readbackPending = false;
+        });
+  }
 
 #ifndef EMSCRIPTEN
   ctx.surface.Present();
@@ -1372,10 +1407,17 @@ void Renderer::renderGui(wgpu::CommandEncoder &encoder,
   ImGui_ImplGlfw_NewFrame();
   ImGui::NewFrame();
 
-  // Your UI code
+  ImGui::SetNextWindowSize(ImVec2(300, 100));
   ImGui::Begin("Settings");
   ImGui::Text("Application average %.3f ms/frame",
               1000.0f / ImGui::GetIO().Framerate);
+
+  ImGui::Separator();
+  ImGui::Text("rendered meshlets: %d/%d", renderedMeshletsCount, meshletCount);
+  ImGui::Text("rendered triangles: %d/%d",
+              maxMeshletTriangleCount * renderedMeshletsCount,
+              maxMeshletTriangleCount * meshletCount);
+
   ImGui::End();
 
   // Render ImGui

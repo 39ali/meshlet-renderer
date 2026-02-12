@@ -45,6 +45,9 @@ private:
   wgpu::Buffer meshInstanceBuffer;
 
   wgpu::Buffer indirectBuffer;
+  wgpu::Buffer readbackBuffer;
+  bool readbackPending = false;
+  uint32_t renderedMeshletsCount = 0;
   wgpu::Buffer visibleMeshletBuffer;
 
   wgpu::Texture hizTexture;
