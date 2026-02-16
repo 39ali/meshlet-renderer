@@ -31,6 +31,7 @@ private:
   wgpu::Buffer sceneBuffer;
 
   wgpu::RenderPipeline renderPipeline;
+  wgpu::RenderPipeline zpassPipeline;
   wgpu::BindGroup renderBindGroup;
 
   wgpu::ComputePipeline cullingPipeline;
@@ -49,6 +50,7 @@ private:
   bool readbackPending = false;
   uint32_t renderedMeshletsCount = 0;
   wgpu::Buffer visibleMeshletBuffer;
+  wgpu::Buffer prevVisibleMeshletBuffer;
 
   wgpu::Texture hizTexture;
   wgpu::TextureView hizBaseView;

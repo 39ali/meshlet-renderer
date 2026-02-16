@@ -56,6 +56,10 @@ WebGPUContext::WebGPUContext(GLFWwindow *windowHandle, uint32_t width,
   desc.nextInChain = &deviceTogglesDesc;
 #endif
 
+  wgpu::Limits limits{};
+  adapter.GetLimits(&limits);
+  desc.requiredLimits = &limits;
+
   wgpu::Future f2 = adapter.RequestDevice(
       &desc, wgpu::CallbackMode::WaitAnyOnly,
       [this](wgpu::RequestDeviceStatus status, wgpu::Device d,

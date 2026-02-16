@@ -30,7 +30,7 @@ struct SceneData {
   float screenHeight;
   uint32_t hizMipCount;
   uint32_t hasPrevDepth;
-  uint32_t _pad1;
+  uint32_t late;
 };
 
 struct Vertex {
@@ -332,7 +332,7 @@ Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
   std::vector<MeshInstance> meshInstances;
   {
     glm::mat4 scaleMat = glm::scale(glm::mat4(1.0f), glm::vec3(0.02f));
-    uint32_t instanceCount = 100000;
+    uint32_t instanceCount = 10000;
     float spacing = 3.0f;
     int gridSize =
         static_cast<int>(std::ceil(std::pow(instanceCount, 1.0 / 3.0)));
@@ -393,6 +393,13 @@ Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
     visibleMeshletBuffer = ctx.device.CreateBuffer(&desc);
   }
 
+  {
+    wgpu::BufferDescriptor desc{};
+    desc.label = "prevVisibleMeshletBuffer";
+    desc.size = meshletInstanceBuffer.GetSize();
+    desc.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
+    prevVisibleMeshletBuffer = ctx.device.CreateBuffer(&desc);
+  }
   meshletCount = meshlets.size() * meshInstances.size();
 
   maxMeshletTriangleCount = 0;
@@ -845,12 +852,6 @@ fn fs_main(@location(0) color : vec3<f32>) -> @location(0) vec4<f32> {
 
   colorTarget.blend = &blend;
 
-  wgpu::DepthStencilState depthState{
-      .format = wgpu::TextureFormat::Depth24Plus,
-      .depthWriteEnabled = true,
-      .depthCompare = wgpu::CompareFunction::LessEqual,
-  };
-
   wgpu::FragmentState fragment = {};
   fragment.module = shaderModule;
   fragment.entryPoint = "fs_main";
@@ -862,18 +863,29 @@ fn fs_main(@location(0) color : vec3<f32>) -> @location(0) vec4<f32> {
   rpDesc.vertex = {
       .module = shaderModule, .entryPoint = "vs_main", .buffers = {}};
   rpDesc.fragment = &fragment;
-  rpDesc.depthStencil = &depthState;
 
+  wgpu::DepthStencilState depthState{
+      .format = wgpu::TextureFormat::Depth24Plus,
+      .depthWriteEnabled = true,
+      .depthCompare = wgpu::CompareFunction::LessEqual,
+  };
+  rpDesc.depthStencil = &depthState;
   rpDesc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
   rpDesc.primitive.frontFace = wgpu::FrontFace::CCW;
-  rpDesc.primitive.cullMode = wgpu::CullMode::None;
+  rpDesc.primitive.cullMode = wgpu::CullMode::Back;
 
   renderPipeline = ctx.device.CreateRenderPipeline(&rpDesc);
+
+  //
+  rpDesc.label = "zpass";
+  rpDesc.fragment = nullptr;
+
+  zpassPipeline = ctx.device.CreateRenderPipeline(&rpDesc);
 }
 
 void Renderer::initCullPipeline() {
 
-  wgpu::BindGroupLayoutEntry entries[10] = {};
+  wgpu::BindGroupLayoutEntry entries[11] = {};
 
   // scene
   entries[0].binding = 0;
@@ -934,10 +946,16 @@ void Renderer::initCullPipeline() {
   entries[9].visibility = wgpu::ShaderStage::Compute;
   entries[9].texture.sampleType = wgpu::TextureSampleType::UnfilterableFloat;
 
-  wgpu::BindGroupLayoutDescriptor bglDesc{.entryCount = 10, .entries = entries};
+  // prevVisibleMeshlet
+  entries[10].binding = 10;
+  entries[10].visibility = wgpu::ShaderStage::Compute;
+  entries[10].buffer.type = wgpu::BufferBindingType::Storage;
+  entries[10].buffer.minBindingSize = visibleMeshletBuffer.GetSize();
+
+  wgpu::BindGroupLayoutDescriptor bglDesc{.entryCount = 11, .entries = entries};
   wgpu::BindGroupLayout bgl = ctx.device.CreateBindGroupLayout(&bglDesc);
 
-  wgpu::BindGroupEntry bgEntries[10] = {};
+  wgpu::BindGroupEntry bgEntries[11] = {};
   bgEntries[0].binding = 0;
   bgEntries[0].buffer = sceneBuffer;
   bgEntries[0].offset = 0;
@@ -986,9 +1004,14 @@ void Renderer::initCullPipeline() {
   bgEntries[9].binding = 9;
   bgEntries[9].textureView = hizBaseView;
 
+  bgEntries[10].binding = 10;
+  bgEntries[10].buffer = prevVisibleMeshletBuffer;
+  bgEntries[10].offset = 0;
+  bgEntries[10].size = prevVisibleMeshletBuffer.GetSize();
+
   auto bgd = wgpu::BindGroupDescriptor{.label = "culling bindgroup",
                                        .layout = bgl,
-                                       .entryCount = 10,
+                                       .entryCount = 11,
                                        .entries = bgEntries};
   cullingBindGroup = ctx.device.CreateBindGroup(&bgd);
 
@@ -1005,7 +1028,7 @@ struct SceneData {
   screenHeight: f32,
   hizMipCount: u32,
   hasPrevDepth : u32,
-  _pad1: u32,  
+  late: u32,  
 };
 
 
@@ -1055,6 +1078,8 @@ struct MeshletInstance {
 @group(0) @binding(8) var<storage, read_write> drawArgs: DrawIndirectArgs;
 
 @group(0) @binding(9) var hizTex: texture_2d<f32>;
+@group(0) @binding(10) var<storage, read_write> prevVisibleMeshlet: array<u32>;
+
 
 
 fn sphereInViewFrustum(center: vec3<f32>, radius: f32) -> bool {
@@ -1130,6 +1155,13 @@ fn main(@builtin(workgroup_id) wgID : vec3<u32>,
         return;
     }
 
+    //1st pass: only test previously visible meshlets
+    if (scene.late == 0 && prevVisibleMeshlet[meshletIndex] == 0u) {
+        return;
+    }
+
+    var visible = true;
+
     if (scene.hasPrevDepth==1){
 
       let instance = meshletInstances[meshletIndex];
@@ -1149,13 +1181,13 @@ fn main(@builtin(workgroup_id) wgID : vec3<u32>,
       //backface culling
       let v = normalize(center_world.xyz-scene.cameraPos);
       if (dot(v,axis) >= cutoff) {
-          return;
+        visible = false;
       }
 
       // frustum culling
       let center_view = scene.view * center_world;
       if (!sphereInViewFrustum(center_view.xyz, radius)) {
-          return;
+        visible = false;
       }
 
       // occlusion culling
@@ -1189,17 +1221,23 @@ fn main(@builtin(workgroup_id) wgID : vec3<u32>,
         let sphereDepth = clip.z / clip.w;
 
         if (sphereDepth > depthMax + 0.0009){
-          return; 
+          visible=false; 
         }
 
       }
     
     }
 
-    let instanceIndex =
-        atomicAdd(&drawArgs.instanceCount, 1u);
+    if (visible) {
+      let instanceIndex =
+          atomicAdd(&drawArgs.instanceCount, 1u);
+          visibleMeshlets[instanceIndex] = meshletIndex;
+    }
 
-    visibleMeshlets[instanceIndex] = meshletIndex;
+   
+    if (scene.late == 1u && scene.hasPrevDepth==1) {
+      prevVisibleMeshlet[meshletIndex] = select(0u, 1u, visible);
+    }
 }
 
   )";
@@ -1245,6 +1283,7 @@ void Renderer::render(const FlyCamera &camera, float time) {
   scene.screenHeight = ctx.height;
   scene.hizMipCount = hizTexture.GetMipLevelCount();
   scene.hasPrevDepth = hasPrevDepth;
+  scene.late = 0;
 
   ctx.queue.WriteBuffer(sceneBuffer, 0, &scene, sizeof(SceneData));
 
@@ -1259,6 +1298,7 @@ void Renderer::render(const FlyCamera &camera, float time) {
 
   wgpu::CommandEncoder encoder = ctx.device.CreateCommandEncoder();
 
+  // cull using prev hiz
   {
     wgpu::ComputePassEncoder pass = encoder.BeginComputePass();
     pass.SetPipeline(cullingPipeline);
@@ -1271,7 +1311,78 @@ void Renderer::render(const FlyCamera &camera, float time) {
     pass.End();
   }
 
-  // render
+  // zpass
+  {
+    wgpu::RenderPassDepthStencilAttachment depthAttachment{
+        .view = depthView,
+        .depthLoadOp = wgpu::LoadOp::Clear,
+        .depthStoreOp = wgpu::StoreOp::Store,
+        .depthClearValue = 1.0f};
+
+    wgpu::RenderPassDescriptor passDesc{.colorAttachmentCount = 0,
+                                        .colorAttachments = nullptr,
+                                        .depthStencilAttachment =
+                                            &depthAttachment
+
+    };
+    wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&passDesc);
+    pass.SetPipeline(zpassPipeline);
+    pass.SetBindGroup(0, renderBindGroup);
+    pass.DrawIndirect(indirectBuffer, 0);
+    pass.End();
+  }
+
+  // generate hiz mips
+  {
+
+    // copy depth to hiz 0
+    {
+      wgpu::ComputePassEncoder pass = encoder.BeginComputePass();
+      pass.SetPipeline(depthCopyPipeline);
+      pass.SetBindGroup(0, depthCopyBindGroup);
+
+      uint32_t w = (ctx.width + 7) / 8;
+      uint32_t h = (ctx.height + 7) / 8;
+      pass.DispatchWorkgroups(w, h, 1);
+      pass.End();
+    }
+    for (uint32_t mip = 1; mip < hizViews.size(); mip++) {
+      wgpu::ComputePassEncoder pass = encoder.BeginComputePass();
+      uint32_t mipWidth = std::max(1u, ctx.width >> mip);
+      uint32_t mipHeight = std::max(1u, ctx.height >> mip);
+
+      uint32_t groupsX = (mipWidth + 7) / 8;
+      uint32_t groupsY = (mipHeight + 7) / 8;
+
+      pass.SetPipeline(hizGenPipeline);
+
+      pass.SetBindGroup(0, hizGenBindGroups[mip - 1]);
+
+      pass.DispatchWorkgroups(groupsX, groupsY);
+
+      pass.End();
+    }
+
+    hasPrevDepth = true;
+  }
+
+  // cull using the new hiz
+  {
+    scene.late = true;
+    ctx.queue.WriteBuffer(sceneBuffer, 0, &scene, sizeof(SceneData));
+
+    wgpu::ComputePassEncoder pass = encoder.BeginComputePass();
+    pass.SetPipeline(cullingPipeline);
+    pass.SetBindGroup(0, cullingBindGroup);
+    uint32_t totalGroups = (meshletCount + 63) / 64;
+    uint32_t groupsX = std::min(totalGroups, 65535u);
+    uint32_t groupsY = (totalGroups + 65534u) / 65535u;
+
+    pass.DispatchWorkgroups(groupsX, groupsY, 1);
+    pass.End();
+  }
+
+  // final render
   {
     wgpu::RenderPassColorAttachment colorAttachment{
         .view = view,
@@ -1298,38 +1409,7 @@ void Renderer::render(const FlyCamera &camera, float time) {
     pass.End();
   }
 
-  // copy depth to hiz 0
-  {
-    wgpu::ComputePassEncoder pass = encoder.BeginComputePass();
-    pass.SetPipeline(depthCopyPipeline);
-    pass.SetBindGroup(0, depthCopyBindGroup);
-
-    uint32_t w = (ctx.width + 7) / 8;
-    uint32_t h = (ctx.height + 7) / 8;
-    pass.DispatchWorkgroups(w, h, 1);
-    pass.End();
-  }
-  // generate hiz mips
-  {
-    for (uint32_t mip = 1; mip < hizViews.size(); mip++) {
-      wgpu::ComputePassEncoder pass = encoder.BeginComputePass();
-      uint32_t mipWidth = std::max(1u, ctx.width >> mip);
-      uint32_t mipHeight = std::max(1u, ctx.height >> mip);
-
-      uint32_t groupsX = (mipWidth + 7) / 8;
-      uint32_t groupsY = (mipHeight + 7) / 8;
-
-      pass.SetPipeline(hizGenPipeline);
-
-      pass.SetBindGroup(0, hizGenBindGroups[mip - 1]);
-
-      pass.DispatchWorkgroups(groupsX, groupsY);
-
-      pass.End();
-    }
-
-    hasPrevDepth = true;
-  }
+  //
 
   if (!readbackPending) {
     encoder.CopyBufferToBuffer(indirectBuffer, 0, readbackBuffer, 0,

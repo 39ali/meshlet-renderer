@@ -15,7 +15,7 @@ uint32_t height = 720;
 Timer timer{};
 GLFWwindow *window;
 InputManager input;
-FlyCamera camera(45.0f, width / (float)height, 0.1f, 1000.0f);
+FlyCamera camera(45.0f, width / (float)height, 0.01f, 1000.0f);
 Renderer *renderer;
 bool isCamMode = false;
 float totatlTime = 0;
@@ -44,6 +44,7 @@ void loop() {
   input.update();
 
 #ifdef __EMSCRIPTEN__
+  // we need this for webgpu async events to be triggered
   emscripten_sleep(0);
 #endif
 }
@@ -61,7 +62,7 @@ int main() {
   input.init(window);
   renderer = new Renderer{window, width, height, xscale, yscale};
 
-  camera.position.z = 150;
+  camera.position.z = 80;
   camera.position.x = 20;
 
 #ifdef EMSCRIPTEN
