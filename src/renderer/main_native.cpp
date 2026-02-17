@@ -55,7 +55,7 @@ int main() {
   }
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-  window = glfwCreateWindow(width, height, "WebGPU Clouds", nullptr, nullptr);
+  window = glfwCreateWindow(width, height, "WebGPU Renderer", nullptr, nullptr);
   float xscale, yscale;
   glfwGetWindowContentScale(window, &xscale, &yscale);
 
