@@ -50,7 +50,9 @@ struct Meshlet {
 };
 
 struct MeshInstance {
-  glm::mat4 modelMatrix;
+  glm::vec3 position;
+  float scale;
+  glm::vec4 orientation;
 };
 
 struct MeshletInstance {
@@ -180,8 +182,10 @@ void buildMeshlets(const std::vector<Vertex> &vertices,
     meshletsOut[i].boundingSphere1 = glm::vec2(b.center[2], b.radius);
 
     meshletsOut[i].boundingCone =
-        uint32_t(b.cone_cutoff_s8) << 24 | uint32_t(b.cone_axis_s8[2]) << 16 |
-        uint32_t(b.cone_axis_s8[1]) << 8 | uint32_t(b.cone_axis_s8[0]);
+        (uint32_t(uint8_t(b.cone_axis_s8[0]))) |       // x -> byte 0
+        (uint32_t(uint8_t(b.cone_axis_s8[1])) << 8) |  // y -> byte 1
+        (uint32_t(uint8_t(b.cone_axis_s8[2])) << 16) | // z -> byte 2
+        (uint32_t(uint8_t(b.cone_cutoff_s8)) << 24);   // w -> byte 3
 
     meshletsOut[i].color = generateRandomColor();
   }
@@ -332,7 +336,7 @@ Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
   std::vector<MeshInstance> meshInstances;
   {
     glm::mat4 scaleMat = glm::scale(glm::mat4(1.0f), glm::vec3(0.02f));
-    uint32_t instanceCount = 10000;
+    uint32_t instanceCount = 5000;
     float spacing = 3.0f;
     int gridSize =
         static_cast<int>(std::ceil(std::pow(instanceCount, 1.0 / 3.0)));
@@ -342,9 +346,13 @@ Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
         for (int z = 0; z < gridSize; z++) {
           glm::vec3 position = glm::vec3(x * spacing, y * spacing, z * spacing);
 
-          glm::mat4 model =
-              glm::translate(glm::mat4(1.0f), position) * scaleMat;
-          meshInstances.push_back({.modelMatrix = model});
+          // glm::mat4 model =
+          //     glm::translate(glm::mat4(1.0f), position) * scaleMat;
+          // x, y, z, w)
+          meshInstances.push_back(
+              {.position = position,
+               .scale = 0.02f,
+               .orientation = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)});
 
           if (meshInstances.size() >= instanceCount)
             break;
@@ -383,6 +391,8 @@ Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
 
     ctx.queue.WriteBuffer(meshletInstanceBuffer, 0, meshletInstances.data(),
                           meshletInstanceBuffer.GetSize());
+
+    meshletCount = meshletInstances.size();
   }
 
   {
@@ -400,7 +410,6 @@ Renderer::Renderer(GLFWwindow *window, uint32_t width, uint32_t height,
     desc.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
     prevVisibleMeshletBuffer = ctx.device.CreateBuffer(&desc);
   }
-  meshletCount = meshlets.size() * meshInstances.size();
 
   maxMeshletTriangleCount = 0;
   for (auto &meshlet : meshlets) {
@@ -739,7 +748,9 @@ struct Meshlet {
 };
 
 struct MeshInstance {
-  modelMatrix: mat4x4<f32>,
+  position:vec3f,
+  scale:f32,
+  orientation:vec4f
 };
 
 struct MeshletInstance {
@@ -781,6 +792,10 @@ fn rand3(meshletID: u32) -> vec3<f32> {
     return vec3<f32>(r, g, b);
 }
 
+fn rotateQuat(v: vec3<f32>, q: vec4<f32>) -> vec3<f32> {
+    return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
+}
+
 @vertex
 fn vs_main(
     @builtin(vertex_index) vtx : u32,
@@ -806,7 +821,7 @@ fn vs_main(
   let v = vertices[vertexIndex];
 
     var out : VSOut;
-    out.pos = scene.proj* scene.view * mesh.modelMatrix * vec4<f32>(v.pos, 1.0);
+    out.pos = scene.proj* scene.view * vec4<f32>( rotateQuat(v.pos,mesh.orientation)*mesh.scale + mesh.position, 1.0);
     
     out.color =vec3f( f32(meshlet.color&0xff)/255.0 , f32((meshlet.color>>8)&0xff)/255. ,f32((meshlet.color>>16)&0xff)/255.0);
     return out;
@@ -1050,7 +1065,9 @@ struct Meshlet {
 };
 
 struct MeshInstance {
-  modelMatrix: mat4x4<f32>,
+  position:vec3f,
+  scale:f32,
+  orientation:vec4f
 };
 
 struct MeshletInstance {
@@ -1140,6 +1157,24 @@ fn projectSphereView(
     return true; 
 }
 
+
+fn coneCull(center: vec3f,
+            radius: f32,
+            axis: vec3f,
+            cutoff: f32,
+            cameraPos: vec3f) -> bool
+{
+    let v =  center-cameraPos;
+    let dist = length(v);
+
+    return dot(v, axis) >= cutoff * dist -radius ;
+}
+
+fn rotateQuat(v: vec3<f32>, q: vec4<f32>) -> vec3<f32> {
+    return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
+}
+
+
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) wgID : vec3<u32>,
     @builtin(local_invocation_id) localID : vec3<u32>,
@@ -1155,8 +1190,11 @@ fn main(@builtin(workgroup_id) wgID : vec3<u32>,
         return;
     }
 
-    //1st pass: only test previously visible meshlets
-    if (scene.late == 0 && prevVisibleMeshlet[meshletIndex] == 0u) {
+    // first pass processes only previously visible meshlets
+    if (scene.hasPrevDepth==1&& 
+        scene.late == 0u &&
+        prevVisibleMeshlet[meshletIndex] == 0u)
+    {
         return;
     }
 
@@ -1169,23 +1207,28 @@ fn main(@builtin(workgroup_id) wgID : vec3<u32>,
       let m = meshlets[instance.meshletID];
       let mesh =meshInstances[instance.meshInstanceID];
 
-      let center_world = mesh.modelMatrix * vec4f(m.boundingSphere0,m.boundingSphere1.x,1.0);
+      var center = vec3f(m.boundingSphere0,m.boundingSphere1.x);
     
-      let uniformScale = length(mesh.modelMatrix[0].xyz); 
-      let radius = m.boundingSphere1.y*uniformScale *1.1;
+      let center_world = rotateQuat(center,mesh.orientation)* mesh.scale + mesh.position;
+      let center_view = scene.view * vec4f(center_world,1.0);
+      
+      let radius = m.boundingSphere1.y*mesh.scale;
 
-      let axis_unpacked = vec3f(f32(m.boundingCone&0xff)/127.0,f32((m.boundingCone>>8)&0xff)/127.0,f32((m.boundingCone>>16)&0xff)/127.0);
-      let axis   = normalize((mesh.modelMatrix*vec4(axis_unpacked, 0.0)).xyz);
-      let cutoff =f32((m.boundingCone>>24)&0xff)/127.0;
+      var axis_unpacked: vec4<f32> = unpack4x8snorm(m.boundingCone);
+      var axis = rotateQuat(axis_unpacked.xyz,mesh.orientation);
+      axis = (scene.view * vec4(axis, 0.0)).xyz;
+      
+      let cutoff =axis_unpacked.w;
 
       //backface culling
-      let v = normalize(center_world.xyz-scene.cameraPos);
-      if (dot(v,axis) >= cutoff) {
-        visible = false;
-      }
+     visible = !coneCull(center_view.xyz,
+                               radius,
+                               axis,
+                               cutoff,
+                               vec3f(0.0));
+        
 
       // frustum culling
-      let center_view = scene.view * center_world;
       if (!sphereInViewFrustum(center_view.xyz, radius)) {
         visible = false;
       }
@@ -1228,16 +1271,38 @@ fn main(@builtin(workgroup_id) wgID : vec3<u32>,
     
     }
 
-    if (visible) {
-      let instanceIndex =
-          atomicAdd(&drawArgs.instanceCount, 1u);
-          visibleMeshlets[instanceIndex] = meshletIndex;
+    var append = false;
+    if (scene.hasPrevDepth == 0u) {
+        append = true;
+    }
+    else {
+        
+        // first pass : reused meshlets
+        if (scene.late == 0u) {
+            append = visible;
+        }
+
+        // 2nd pass : newly visible meshlets
+        if (scene.late == 1u &&
+            prevVisibleMeshlet[meshletIndex] == 0u)
+        {
+            append = visible;
+        }
     }
 
-   
-    if (scene.late == 1u && scene.hasPrevDepth==1) {
-      prevVisibleMeshlet[meshletIndex] = select(0u, 1u, visible);
+    if (append) {
+        let instanceIndex =
+            atomicAdd(&drawArgs.instanceCount, 1u);
+
+        visibleMeshlets[instanceIndex]=meshletIndex;
     }
+
+    if (scene.late == 1u)
+    {
+        prevVisibleMeshlet[meshletIndex] =
+            select(0u, 1u, visible);
+    }
+ 
 }
 
   )";
@@ -1362,16 +1427,18 @@ void Renderer::render(const FlyCamera &camera, float time) {
 
       pass.End();
     }
-
-    hasPrevDepth = true;
   }
 
+  wgpu::CommandBuffer cmd = encoder.Finish();
+  ctx.queue.Submit(1, &cmd);
+
+  wgpu::CommandEncoder encoder2 = ctx.device.CreateCommandEncoder();
   // cull using the new hiz
   {
     scene.late = true;
     ctx.queue.WriteBuffer(sceneBuffer, 0, &scene, sizeof(SceneData));
 
-    wgpu::ComputePassEncoder pass = encoder.BeginComputePass();
+    wgpu::ComputePassEncoder pass = encoder2.BeginComputePass();
     pass.SetPipeline(cullingPipeline);
     pass.SetBindGroup(0, cullingBindGroup);
     uint32_t totalGroups = (meshletCount + 63) / 64;
@@ -1402,26 +1469,26 @@ void Renderer::render(const FlyCamera &camera, float time) {
                                             &depthAttachment
 
     };
-    wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&passDesc);
+    wgpu::RenderPassEncoder pass = encoder2.BeginRenderPass(&passDesc);
     pass.SetPipeline(renderPipeline);
     pass.SetBindGroup(0, renderBindGroup);
     pass.DrawIndirect(indirectBuffer, 0);
     pass.End();
   }
 
-  //
+  hasPrevDepth = true;
 
+  //
   if (!readbackPending) {
-    encoder.CopyBufferToBuffer(indirectBuffer, 0, readbackBuffer, 0,
-                               indirectBuffer.GetSize());
+    encoder2.CopyBufferToBuffer(indirectBuffer, 0, readbackBuffer, 0,
+                                indirectBuffer.GetSize());
   }
 
   // gui pass
-  renderGui(encoder, view);
+  renderGui(encoder2, view);
 
-  wgpu::CommandBuffer cmd = encoder.Finish();
-
-  ctx.queue.Submit(1, &cmd);
+  wgpu::CommandBuffer cmd1 = encoder2.Finish();
+  ctx.queue.Submit(1, &cmd1);
 
   if (!readbackPending) {
     readbackPending = true;
