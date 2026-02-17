@@ -1,6 +1,10 @@
 
 Meshlet renderer experiment using WebGPU for rendering millions of triangles.
 
+
+https://github.com/user-attachments/assets/34f0e16e-0b8e-46b6-958a-e024714d0ab1
+
+
 ### Features
 - Frustum culling
 - Backface culling
