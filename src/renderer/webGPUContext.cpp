@@ -83,9 +83,10 @@ WebGPUContext::WebGPUContext(GLFWwindow *windowHandle, uint32_t width,
 
   wgpu::SurfaceConfiguration config{.device = device,
                                     .format = backbufferFormat,
-                                    .width = width * int(xscale),
-                                    .height = height * int(yscale)};
+                                    .width = uint32_t(width * xscale),
+                                    .height = uint32_t(height * yscale)};
 
+  std::cout << "scale:" << xscale << "," << yscale << std::endl;
   std::cout << "surface:" << config.width << "," << config.height << std::endl;
   surface.Configure(&config);
 
