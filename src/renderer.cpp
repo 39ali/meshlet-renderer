@@ -1532,6 +1532,9 @@ void Renderer::initGui(GLFWwindow *window) {
   init_info.DepthStencilFormat = WGPUTextureFormat_Undefined;
 
   ImGui_ImplWGPU_Init(&init_info);
+
+  ImGuiIO &io = ImGui::GetIO();
+  io.DisplaySize = ImVec2(ctx.width, ctx.height);
 }
 void Renderer::renderGui(wgpu::CommandEncoder &encoder,
                          wgpu::TextureView &view) {
